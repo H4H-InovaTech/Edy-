@@ -1,28 +1,33 @@
-// background.js
-// Service worker de la extensión.
-// Recibe mensajes del content script y los reenvía al dashboard o a la API.
+// background.js — Edy service worker
+// Manages extension icon state and routes popup commands to the active tab's content script.
 
-// Estados del ícono de la barra (referencia):
-//   observando / ejecutando -> icons/EdyPensando.png
-//   completado              -> icons/EdySonriente.png
-//   idle                    -> icons/EdyNeutro.png
-
-// Recibe mensajes del content_script (widget flotante de Edy) y reacciona.
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (!msg || !msg.tipo) return;
+  if (!msg?.tipo) return;
 
   switch (msg.tipo) {
-    case "iniciar_grabacion":
-    case "iniciar_ejecucion":
-      chrome.action.setIcon({ path: "icons/EdyPensando.png" });
-      // TODO: aquí va la lógica real de grabación/ejecución.
+    case 'iniciar_grabacion':
+      chrome.action.setIcon({ path: 'icons/EdyPensando.png' });
       break;
 
-    case "detener_grabacion":
-      chrome.action.setIcon({ path: "icons/EdyNeutro.png" });
+    case 'detener_grabacion':
+      chrome.action.setIcon({ path: 'icons/EdyNeutro.png' });
       break;
 
-    case "abrir_dashboard":
+    case 'iniciar_ejecucion':
+      chrome.action.setIcon({ path: 'icons/EdyPensando.png' });
+      // Forward to the active tab so content_script.js handles the actual work
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { tipo: 'iniciar_ejecucion' });
+        }
+      });
+      break;
+
+    case 'ejecucion_completada':
+      chrome.action.setIcon({ path: 'icons/EdySonriente.png' });
+      break;
+
+    case 'abrir_dashboard':
       if (msg.url) chrome.tabs.create({ url: msg.url });
       break;
   }
