@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Arca Agent",
+  "version": "1.0",
+  "description": "Agente IA que observa y automatiza procesos entre sistemas web",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": [
+    "https://api.anthropic.com/*",
+    "https://script.google.com/*",
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/EdyNeutro.png",
+      "32": "icons/EdyNeutro.png",
+      "48": "icons/EdyNeutro.png",
+      "128": "icons/EdyNeutro.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
