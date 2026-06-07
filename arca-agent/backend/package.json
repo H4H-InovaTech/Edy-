@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "check": "node --check server.js && node --check api/aprender-mapeo.js && node --check api/health.js && node --check lib/gemini.js && node --check lib/cors.js"
+    "check": "node --check server.js && node --check api/aprender-mapeo.js && node --check api/health.js && node --check api/pedidos.js && node --check lib/gemini.js && node --check lib/cors.js && node --check lib/pedidos.js"
   },
   "engines": {
     "node": ">=18"

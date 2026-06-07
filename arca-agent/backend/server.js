@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { aprenderMapeoConGemini } from "./lib/gemini.js";
 import { setCorsHeaders } from "./lib/cors.js";
+import { guardarPedido, listarPedidos } from "./lib/pedidos.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv(path.join(__dirname, ".env"));
@@ -20,13 +21,35 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    if (req.method === "GET" && req.url === "/health") {
+    if (req.method === "GET" && (req.url === "/" || req.url === "/dashboard.js" || req.url?.startsWith("/icons/"))) {
+      await servirArchivoEstatico(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/api/health") {
       sendJson(res, 200, {
         ok: true,
         service: "arca-agent-backend",
         runtime: "local",
         geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
       });
+      return;
+    }
+
+    if (req.url === "/api/pedidos") {
+      if (req.method === "GET") {
+        sendJson(res, 200, { ok: true, data: listarPedidos() });
+        return;
+      }
+
+      if (req.method === "POST") {
+        const payload = await readJsonBody(req);
+        const registro = guardarPedido(payload);
+        sendJson(res, 200, { ok: true, data: registro });
+        return;
+      }
+
+      sendJson(res, 405, { ok: false, error: "Metodo no permitido" });
       return;
     }
 
@@ -61,6 +84,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Arca Agent backend escuchando en el puerto ${PORT}`);
+  console.log(`Dashboard local: http://localhost:${PORT}/`);
   console.log(`Endpoint local: http://localhost:${PORT}/api/aprender-mapeo`);
 });
 
@@ -98,4 +122,30 @@ async function readJsonBody(req) {
 function sendJson(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
+}
+
+async function servirArchivoEstatico(req, res) {
+  const pathname = req.url === "/" ? "/index.html" : req.url;
+  const relativePath = pathname.replace(/^\/+/, "");
+  const filePath = path.join(__dirname, "public", relativePath);
+
+  if (!filePath.startsWith(path.join(__dirname, "public"))) {
+    sendJson(res, 403, { ok: false, error: "Ruta no permitida" });
+    return;
+  }
+
+  if (!fs.existsSync(filePath)) {
+    sendJson(res, 404, { ok: false, error: "Archivo no encontrado" });
+    return;
+  }
+
+  const ext = path.extname(filePath);
+  const contentType =
+    ext === ".html" ? "text/html; charset=utf-8" :
+    ext === ".js" ? "text/javascript; charset=utf-8" :
+    ext === ".png" ? "image/png" :
+    "application/octet-stream";
+
+  res.writeHead(200, { "Content-Type": contentType });
+  fs.createReadStream(filePath).pipe(res);
 }
