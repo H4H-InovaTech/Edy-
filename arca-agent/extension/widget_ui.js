@@ -243,7 +243,8 @@
           <div class="titulo titulo-ok">¡Flujo completado!</div>
           <div class="subtitulo">Edy automatizó este proceso</div>
           <div class="botones" style="margin-top:16px;">
-            <button id="btn-nuevo" class="btn-rojo">● Nuevo proceso</button>
+            <button id="btn-reejecutar" class="btn-rojo">▶ Volver a ejecutar</button>
+            <button id="btn-nuevo" class="btn-outline">● Nuevo proceso</button>
           </div>
         </section>
 
@@ -260,7 +261,7 @@
             <div class="mascota-disco"><img src="${icono("EdySonriente.png")}" alt="Edy ejecutando"></div>
           </div>
           <div class="titulo">Ejecutando solo...</div>
-          <div class="subtitulo" id="orden-info">Orden #C-4821 · OXXO La Pastora</div>
+          <div class="subtitulo" id="orden-info">Preparando orden...</div>
           <div class="progreso"><div class="barra" id="barra-eje"></div></div>
           <div id="lista-pasos"></div>
           <div class="botones" style="flex-direction: column;">
@@ -292,11 +293,13 @@
   const btnDashboard = $("#btn-dashboard");
   const btnPausar = $("#btn-pausar");
   const btnNuevo = $("#btn-nuevo");
+  const btnReejecutar = $("#btn-reejecutar");
   const listaCampos = $("#lista-campos");
   const contadorCampos = $("#contador-campos");
   const barraObs = $("#barra-obs");
   const listaPasos = $("#lista-pasos");
   const barraEje = $("#barra-eje");
+  const ordenInfo = $("#orden-info");
 
   let campos = [];
   let totalPasos = 0;
@@ -323,11 +326,18 @@
     secEjecutando.classList.toggle("hidden", estado !== "ejecutando");
     secCompletado.classList.toggle("hidden", estado !== "completado");
     if (estado === "completado") lanzarConfeti();
+    // Auto-open the panel on active states so the user knows Edy is still running
+    // even after page navigation (the panel resets to closed on every new page).
+    if (estado === "observando" || estado === "ejecutando") abrir();
   }
 
   // Actualiza el resumen del estado aprendido (ej: "4 campos · 5 pasos")
   function setResumenAprendido(texto) {
     if (texto) aprendidoResumen.textContent = texto;
+  }
+
+  function setOrdenInfo(texto) {
+    ordenInfo.textContent = texto || "Preparando orden...";
   }
 
   // ---------- Confeti ----------
@@ -420,6 +430,7 @@
   let cbDashboard = noop;
   let cbPausar = noop;
   let cbNuevo = noop;
+  let cbReejecutar = noop;
   btnObservar.addEventListener("click", () => cbObservar());
   btnDetener.addEventListener("click", () => cbDetener());
   btnEjecutar.addEventListener("click", () => {
@@ -430,6 +441,7 @@
   btnRegrabar.addEventListener("click", () => cbObservar());
   btnDashboard.addEventListener("click", () => cbDashboard());
   btnPausar.addEventListener("click", () => cbPausar());
+  btnReejecutar.addEventListener("click", () => cbReejecutar());
   btnNuevo.addEventListener("click", () => {
     habilitarEjecutar(false);
     mostrarEstado("idle");
@@ -446,12 +458,14 @@
     marcarPasoCompletado,
     habilitarEjecutar,
     setResumenAprendido,
+    setOrdenInfo,
     onObservar: (cb) => (cbObservar = cb || noop),
     onDetener: (cb) => (cbDetener = cb || noop),
     onEjecutar: (cb) => (cbEjecutar = cb || noop),
     onDashboard: (cb) => (cbDashboard = cb || noop),
     onPausar: (cb) => (cbPausar = cb || noop),
     onNuevo: (cb) => (cbNuevo = cb || noop),
+    onReejecutar: (cb) => (cbReejecutar = cb || noop),
   };
 
   // Arranque: colapsado mostrando el FAB en estado idle.
