@@ -304,9 +304,10 @@ function construirPlanEjecucion(acciones, mapeo) {
 }
 
 async function enviarAAppsScript(payload, appsScriptUrl) {
-  if (!appsScriptUrl) return null;
+  const url = appsScriptUrl || (await obtenerPedidosBackendUrl());
+  if (!url) return null;
 
-  const respuesta = await fetch(appsScriptUrl, {
+  const respuesta = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -317,6 +318,19 @@ async function enviarAAppsScript(payload, appsScriptUrl) {
   }
 
   return respuesta.text();
+}
+
+async function obtenerPedidosBackendUrl() {
+  const { [STORAGE_KEYS.geminiBackendUrl]: storedBackendUrl } = await chrome.storage.local.get(
+    STORAGE_KEYS.geminiBackendUrl
+  );
+  const backendUrl = storedBackendUrl || DEFAULT_GEMINI_BACKEND_URL;
+
+  try {
+    return new URL("/api/pedidos", backendUrl).toString();
+  } catch {
+    return "";
+  }
 }
 
 async function inyectarGrabador(tabId) {
