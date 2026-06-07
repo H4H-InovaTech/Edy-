@@ -109,6 +109,38 @@
     .paso.done .texto { color:var(--negro); } .paso.done .icono { color:#1aa251; }
     .paso.actual .texto { color:var(--rojo); font-weight:600; } .paso.actual .icono { color:var(--rojo); }
     .paso.pendiente .texto { color:#BBB; } .paso.pendiente .icono { color:#DDD; }
+
+    /* ---------- Estado completado ---------- */
+    #estado-completado .mascota-wrap { overflow:visible; }
+    .check-ring {
+      position:absolute; z-index:3;
+      width:34px; height:34px;
+      background:#1aa251;
+      border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      color:#fff; font-size:18px; font-weight:700;
+      bottom:0; right:calc(50% - 70px);
+      animation: popIn .4s cubic-bezier(.36,2,.6,1) both;
+    }
+    @keyframes popIn { from{transform:scale(0);} to{transform:scale(1);} }
+    .titulo-ok { color:#1aa251; }
+
+    /* Confeti */
+    .confeti-wrap {
+      position:absolute; top:0; left:0; width:100%; height:100%;
+      pointer-events:none; overflow:hidden; border-radius:14px;
+    }
+    .confeti-pieza {
+      position:absolute;
+      width:7px; height:10px;
+      border-radius:2px;
+      top:-12px;
+      animation: caer linear forwards;
+    }
+    @keyframes caer {
+      0%   { transform: translateY(0) rotate(0deg);   opacity:1; }
+      100% { transform: translateY(320px) rotate(720deg); opacity:0; }
+    }
   `;
   shadow.appendChild(style);
 
@@ -163,6 +195,26 @@
           <div class="botones"><button id="btn-detener" class="btn-negro">■ Detener</button></div>
         </section>
 
+        <!-- COMPLETADO -->
+        <section id="estado-completado" class="hidden">
+          <div class="confeti-wrap" id="confeti-wrap"></div>
+          <div class="header">
+            <span class="dot"></span><span class="brand">Edy</span>
+            <span class="org">· Arca Continental</span>
+            <span class="tag">✓ LISTO</span>
+            <span class="cerrar" data-cerrar>✕</span>
+          </div>
+          <div class="mascota-wrap">
+            <div class="check-ring">✓</div>
+            <div class="mascota-disco"><img src="${icono("EdySonriente.png")}" alt="Edy"></div>
+          </div>
+          <div class="titulo titulo-ok">¡Flujo completado!</div>
+          <div class="subtitulo">Edy automatizó este proceso</div>
+          <div class="botones" style="margin-top:16px;">
+            <button id="btn-nuevo" class="btn-rojo">● Nuevo proceso</button>
+          </div>
+        </section>
+
         <!-- EJECUTANDO -->
         <section id="estado-ejecutando" class="hidden">
           <div class="header">
@@ -179,7 +231,7 @@
           <div class="subtitulo" id="orden-info">Orden #C-4821 · OXXO La Pastora</div>
           <div class="progreso"><div class="barra" id="barra-eje"></div></div>
           <div id="lista-pasos"></div>
-          <div class="botones"><button id="btn-dashboard" class="btn-outline">Ver en dashboard →</button></div>
+          <div class="botones"><button id="btn-pausar" class="btn-negro">■ Detener ejecución</button></div>
         </section>
 
       </div>
@@ -194,10 +246,12 @@
   const secIdle = $("#estado-idle");
   const secObservando = $("#estado-observando");
   const secEjecutando = $("#estado-ejecutando");
+  const secCompletado = $("#estado-completado");
   const btnObservar = $("#btn-observar");
   const btnEjecutar = $("#btn-ejecutar");
   const btnDetener = $("#btn-detener");
-  const btnDashboard = $("#btn-dashboard");
+  const btnPausar = $("#btn-pausar");
+  const btnNuevo = $("#btn-nuevo");
   const listaCampos = $("#lista-campos");
   const contadorCampos = $("#contador-campos");
   const barraObs = $("#barra-obs");
@@ -226,6 +280,26 @@
     secIdle.classList.toggle("hidden", estado !== "idle");
     secObservando.classList.toggle("hidden", estado !== "observando");
     secEjecutando.classList.toggle("hidden", estado !== "ejecutando");
+    secCompletado.classList.toggle("hidden", estado !== "completado");
+    if (estado === "completado") lanzarConfeti();
+  }
+
+  // ---------- Confeti ----------
+  function lanzarConfeti() {
+    const wrap = $("#confeti-wrap");
+    wrap.innerHTML = "";
+    const colores = ["#CC0000","#ff4d4d","#1aa251","#FFD700","#4d94ff","#ff99cc"];
+    for (let i = 0; i < 38; i++) {
+      const p = document.createElement("div");
+      p.className = "confeti-pieza";
+      p.style.cssText =
+        "left:" + Math.random() * 100 + "%;" +
+        "background:" + colores[Math.floor(Math.random() * colores.length)] + ";" +
+        "animation-duration:" + (1.2 + Math.random() * 1.4) + "s;" +
+        "animation-delay:" + (Math.random() * 0.5) + "s;" +
+        "transform:rotate(" + Math.random() * 360 + "deg);";
+      wrap.appendChild(p);
+    }
   }
 
   // ---------- Observando: campos detectados ----------
@@ -297,13 +371,19 @@
   let cbObservar = noop;
   let cbDetener = noop;
   let cbEjecutar = noop;
-  let cbDashboard = noop;
+  let cbPausar = noop;
+  let cbNuevo = noop;
   btnObservar.addEventListener("click", () => cbObservar());
   btnDetener.addEventListener("click", () => cbDetener());
   btnEjecutar.addEventListener("click", () => {
     if (!btnEjecutar.disabled) cbEjecutar();
   });
-  btnDashboard.addEventListener("click", () => cbDashboard());
+  btnPausar.addEventListener("click", () => cbPausar());
+  btnNuevo.addEventListener("click", () => {
+    habilitarEjecutar(false);
+    mostrarEstado("idle");
+    cbNuevo();
+  });
 
   // ---------- API pública: lo único que content_script.js debe tocar ----------
   window.EdyWidget = {
@@ -317,7 +397,8 @@
     onObservar: (cb) => (cbObservar = cb || noop),
     onDetener: (cb) => (cbDetener = cb || noop),
     onEjecutar: (cb) => (cbEjecutar = cb || noop),
-    onDashboard: (cb) => (cbDashboard = cb || noop),
+    onPausar: (cb) => (cbPausar = cb || noop),
+    onNuevo: (cb) => (cbNuevo = cb || noop),
   };
 
   // Arranque: colapsado mostrando el FAB en estado idle.

@@ -19,7 +19,7 @@
   }
 
   // ---------- Config ----------
-  const DASHBOARD_URL = ""; // rellenar cuando el dashboard esté desplegado.
+  const DASHBOARD_URL = "http://127.0.0.1:5500/arca-agent/dashboard/index.html";
   const PASOS_EJECUCION = [
     "Abrir SAP / módulo VA01",
     "Capturar cliente_id",
@@ -71,13 +71,10 @@
     iniciarEjecucion();
   });
 
-  widget.onDashboard(() => {
-    if (DASHBOARD_URL) {
-      chrome.runtime.sendMessage({
-        tipo: "abrir_dashboard",
-        url: DASHBOARD_URL,
-      });
-    }
+  widget.onPausar(() => {
+    // TEMPORAL: muestra la pantalla de confeti para previsualizarla.
+    // TODO: restaurar el flujo real (detener_ejecucion → idle).
+    widget.mostrarEstado("completado");
   });
 
   // ---------- Mensajes entrantes del background ----------
@@ -92,6 +89,9 @@
         break;
       case "paso_completado":
         widget.marcarPasoCompletado(msg.paso);
+        break;
+      case "flujo_completado":
+        widget.mostrarEstado("completado");
         break;
     }
   });
