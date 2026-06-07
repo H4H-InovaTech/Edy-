@@ -124,21 +124,23 @@ function enviarABackground(msg) {
 btnObservar.addEventListener('click', () => {
   resetObservando();
   mostrarEstado('observando');
-  enviarAContentScript({ tipo: 'iniciar_grabacion' });
+  enviarABackground({ tipo: 'iniciar_grabacion' });
 });
 
 btnDetener.addEventListener('click', () => {
-  enviarAContentScript({ tipo: 'detener_grabacion' });
+  enviarABackground({ tipo: 'detener_grabacion' });
   mostrarEstado('idle');
-  // Ejecutar will be re-enabled once the backend confirms learning is done
   _habilitarEjecutar(false);
 });
 
 btnEjecutar.addEventListener('click', () => {
   if (btnEjecutar.disabled) return;
-  chrome.storage.local.get(['workflow'], (data) => {
-    const pasos = data.workflow?.pasos_automatizacion?.map((p) => p.descripcion) || ['Procesando…'];
-    renderPasos(pasos);
+  chrome.storage.local.get(['mapeo_aprendido'], (data) => {
+    const mapeo = data['mapeo_aprendido'];
+    const pasos = (mapeo?.pasos_destino || mapeo?.pasos || [])
+      .map((p) => p.nombre)
+      .filter(Boolean);
+    renderPasos(pasos.length ? pasos : ['Iniciando automatización…']);
     mostrarEstado('ejecutando');
     enviarABackground({ tipo: 'iniciar_ejecucion' });
   });
@@ -164,17 +166,22 @@ chrome.runtime.onMessage.addListener((msg) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // INIT — sync state from storage when popup opens
 // ─────────────────────────────────────────────────────────────────────────────
-chrome.storage.local.get(['grabando', 'ejecutando', 'sesionId', 'workflow'], (data) => {
-  if (data.grabando) {
+chrome.storage.local.get(['estado_agente', 'mapeo_aprendido', 'acciones_grabadas'], (data) => {
+  const estado = data['estado_agente'] || 'idle';
+  const mapeo  = data['mapeo_aprendido'];
+  const acciones = data['acciones_grabadas'] || [];
+
+  if (estado === 'observando') {
     mostrarEstado('observando');
-  } else if (data.ejecutando) {
-    const pasos = data.workflow?.pasos_automatizacion?.map((p) => p.descripcion) || ['Procesando…'];
-    renderPasos(pasos);
+  } else if (estado === 'ejecutando') {
+    const pasos = (mapeo?.pasos_destino || mapeo?.pasos || [])
+      .map((p) => p.nombre).filter(Boolean);
+    renderPasos(pasos.length ? pasos : ['Procesando…']);
     mostrarEstado('ejecutando');
   } else {
     mostrarEstado('idle');
-    // Re-enable Execute if a workflow was already learned in a previous session
-    if (data.sesionId && data.workflow) {
+    // Re-enable Execute if a mapping was already learned
+    if (mapeo || acciones.length > 0) {
       _habilitarEjecutar(true);
     }
   }
