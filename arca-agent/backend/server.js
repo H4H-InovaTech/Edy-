@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 import { aprenderMapeoConGemini } from "./lib/gemini.js";
 import { setCorsHeaders } from "./lib/cors.js";
 import { guardarPedido, listarPedidos } from "./lib/pedidos.js";
+import {
+  guardarPedidoEnAppsScript,
+  listarPedidosDesdeAppsScript,
+  tieneAppsScriptUrl,
+} from "./lib/apps-script.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv(path.join(__dirname, ".env"));
@@ -32,18 +37,30 @@ const server = http.createServer(async (req, res) => {
         service: "arca-agent-backend",
         runtime: "local",
         geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+        appsScriptConfigured: Boolean(process.env.APPS_SCRIPT_URL),
       });
       return;
     }
 
     if (req.url === "/api/pedidos") {
       if (req.method === "GET") {
+        if (tieneAppsScriptUrl()) {
+          sendJson(res, 200, await listarPedidosDesdeAppsScript());
+          return;
+        }
+
         sendJson(res, 200, { ok: true, data: listarPedidos() });
         return;
       }
 
       if (req.method === "POST") {
         const payload = await readJsonBody(req);
+
+        if (tieneAppsScriptUrl()) {
+          sendJson(res, 200, await guardarPedidoEnAppsScript(payload));
+          return;
+        }
+
         const registro = guardarPedido(payload);
         sendJson(res, 200, { ok: true, data: registro });
         return;

@@ -1,5 +1,10 @@
 import { setCorsHeaders } from "../lib/cors.js";
 import { guardarPedido, listarPedidos } from "../lib/pedidos.js";
+import {
+  guardarPedidoEnAppsScript,
+  listarPedidosDesdeAppsScript,
+  tieneAppsScriptUrl,
+} from "../lib/apps-script.js";
 
 export default async function handler(req, res) {
   setCorsHeaders(res);
@@ -9,6 +14,11 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "GET") {
+    if (tieneAppsScriptUrl()) {
+      const json = await listarPedidosDesdeAppsScript();
+      return res.status(200).json(json);
+    }
+
     return res.status(200).json({
       ok: true,
       data: listarPedidos(),
@@ -18,6 +28,12 @@ export default async function handler(req, res) {
   if (req.method === "POST") {
     try {
       const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+
+      if (tieneAppsScriptUrl()) {
+        const json = await guardarPedidoEnAppsScript(payload);
+        return res.status(200).json(json);
+      }
+
       const registro = guardarPedido(payload);
 
       return res.status(200).json({

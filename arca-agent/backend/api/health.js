@@ -16,5 +16,6 @@ export default function handler(req, res) {
     service: "arca-agent-backend",
     runtime: "vercel",
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    appsScriptConfigured: Boolean(process.env.APPS_SCRIPT_URL),
   });
 }
