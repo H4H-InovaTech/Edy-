@@ -21,7 +21,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    if (req.method === "GET" && (req.url === "/" || req.url === "/dashboard.js" || req.url?.startsWith("/icons/"))) {
+    if ((req.method === "GET" || req.method === "HEAD") && (req.url === "/" || req.url === "/dashboard.js" || req.url?.startsWith("/icons/"))) {
       await servirArchivoEstatico(req, res);
       return;
     }
@@ -84,7 +84,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Arca Agent backend escuchando en el puerto ${PORT}`);
-  console.log(`Dashboard local: http://localhost:${PORT}/`);
+  console.log(`Dashboard local: http://localhost:${PORT}/api/health`);
   console.log(`Endpoint local: http://localhost:${PORT}/api/aprender-mapeo`);
 });
 
@@ -147,5 +147,9 @@ async function servirArchivoEstatico(req, res) {
     "application/octet-stream";
 
   res.writeHead(200, { "Content-Type": contentType });
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
   fs.createReadStream(filePath).pipe(res);
 }
