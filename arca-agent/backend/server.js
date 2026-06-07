@@ -104,7 +104,15 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const mapeo = await aprenderMapeoConGemini(payload);
+      if (!Array.isArray(payload.acciones) || payload.acciones.length === 0) {
+        sendJson(res, 400, {
+          ok: false,
+          error: "No llegaron acciones para aprender el mapeo.",
+        });
+        return;
+      }
+
+      const mapeo = await aprenderMapeoConGemini(payload.acciones);
       sendJson(res, 200, { ok: true, mapeo });
       return;
     }

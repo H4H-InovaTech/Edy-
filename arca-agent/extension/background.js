@@ -19,6 +19,7 @@ const STORAGE_KEYS = {
   backendUrl:   "geminiBackendUrl",
   appsScriptUrl:"appsScriptUrl",
   ultimoPedido: "ultimo_pedido",
+  ultimoEnvioSheets: "ultimo_envio_sheets",
   originTabId:  "origin_tab_id",
   originUrl:    "origin_url",
   originSnapshot:"origin_snapshot",
@@ -67,6 +68,8 @@ async function manejarMensaje(msg, sender) {
     case "detener_grabacion":
       return detenerGrabacion(sender.tab?.id);
     case "iniciar_ejecucion":
+      return iniciarEjecucion(sender.tab?.id);
+    case "volver_a_ejecutar":
       return iniciarEjecucion(sender.tab?.id);
     case "abrir_dashboard":
       if (msg.url) await chrome.tabs.create({ url: msg.url });
@@ -230,6 +233,9 @@ async function iniciarEjecucion(callerTabId) {
   await guardarLocal({ [STORAGE_KEYS.estado]: estado });
 
   const plan = construirPlanEjecucion(mapeo, acciones);
+  if (!plan.length) {
+    throw new Error("No hay pasos ejecutables. Graba el flujo otra vez desde el inicio.");
+  }
   await enviarATodos({ tipo: "estado_agente", estado, totalAcciones: plan.length });
 
   // Navigate to the supplier portal and start fresh
@@ -282,14 +288,22 @@ async function iniciarEjecucion(callerTabId) {
   };
 
   await guardarLocal({ [STORAGE_KEYS.ultimoPedido]: payload });
-  await enviarAAppsScript(payload, storage[STORAGE_KEYS.appsScriptUrl]).catch((err) =>
-    console.warn("[Edy] Apps Script:", err.message)
-  );
+  await enviarAAppsScript(payload, storage[STORAGE_KEYS.appsScriptUrl]).catch(async (err) => {
+    console.warn("[Edy] Apps Script:", err.message);
+    await guardarLocal({
+      [STORAGE_KEYS.ultimoEnvioSheets]: {
+        ok: false,
+        error: err.message,
+        fecha: new Date().toISOString(),
+      },
+    });
+  });
 
   estado = "idle";
   await guardarLocal({ [STORAGE_KEYS.estado]: estado });
   await chrome.action.setIcon({ path: ICONOS.completado });
   await enviarATodos({ tipo: "estado_agente", estado, totalAcciones: plan.length });
+  await enviarATodos({ tipo: "ejecucion_completada", totalPasos: plan.length });
   setTimeout(() => chrome.action.setIcon({ path: ICONOS.idle }), 1500);
 
   return { ok: true, totalPasos: plan.length };
@@ -344,6 +358,8 @@ async function scrapeConfirmacion(tabId, campos) {
 
 // Build execution plan — handles both new (nested acciones) and legacy (flat) formats
 function construirPlanEjecucion(mapeo, acciones) {
+  const accionesGrabadas = normalizarAcciones(acciones).filter(accionGrabadaEsEjecutableSegura);
+
   // New format: pasos[].acciones[] (nested)
   if (mapeo?.pasos?.length && Array.isArray(mapeo.pasos[0]?.acciones)) {
     return mapeo.pasos
@@ -351,14 +367,8 @@ function construirPlanEjecucion(mapeo, acciones) {
       .map((paso) => ({
         nombre:  paso.nombre || "Paso",
         acciones: paso.acciones
-          .filter((a) => a.selector)
-          .map((a) => ({
-            tipo:        a.tipo || "click",
-            selector:    a.selector,
-            valor:       a.valor || "",
-            nombreCampo: a.campo || a.nombreCampo || "",
-            etiqueta:    a.campo || "",
-          })),
+          .map((accionMapeada) => obtenerAccionGrabadaCorrespondiente(accionMapeada, accionesGrabadas))
+          .filter(Boolean),
       }))
       .filter((paso) => paso.acciones.length > 0);
   }
@@ -367,14 +377,14 @@ function construirPlanEjecucion(mapeo, acciones) {
   if (mapeo?.pasos?.length && mapeo.pasos[0]?.selector) {
     return mapeo.pasos
       .filter((paso) => paso.selector)
+      .map((paso) => ({
+        paso,
+        accionGrabada: obtenerAccionGrabadaCorrespondiente(paso, accionesGrabadas),
+      }))
+      .filter(({ accionGrabada }) => accionGrabada)
       .map((paso, i) => ({
-        nombre:  paso.nombre || `Paso ${i + 1}`,
-        acciones: [{
-          tipo:     paso.accion || paso.tipo || "click",
-          selector: paso.selector,
-          valor:    paso.valor ?? acciones[i]?.valor ?? "",
-          nombreCampo: paso.nombre || "",
-        }],
+        nombre:  paso.paso.nombre || `Paso ${i + 1}`,
+        acciones: [paso.accionGrabada],
       }));
   }
 
@@ -382,7 +392,7 @@ function construirPlanEjecucion(mapeo, acciones) {
   const grupos = [];
   let grupoActual = null;
 
-  for (const accion of acciones) {
+  for (const accion of accionesGrabadas) {
     if (!grupoActual || grupoActual.url !== accion.url) {
       grupoActual = { url: accion.url, nombre: "Página " + (grupos.length + 1), acciones: [] };
       grupos.push(grupoActual);
@@ -391,6 +401,83 @@ function construirPlanEjecucion(mapeo, acciones) {
   }
 
   return grupos.map((g) => ({ nombre: g.nombre, acciones: g.acciones }));
+}
+
+function filtrarAccionesNoGrabadas(accionesMapeadas, accionesGrabadas) {
+  if (!Array.isArray(accionesMapeadas)) return [];
+  if (!Array.isArray(accionesGrabadas) || accionesGrabadas.length === 0) return accionesMapeadas;
+  return accionesMapeadas.filter((accion) => accionMapeadaFueGrabada(accion, accionesGrabadas));
+}
+
+function accionMapeadaFueGrabada(accionMapeada, accionesGrabadas) {
+  return Boolean(obtenerAccionGrabadaCorrespondiente(accionMapeada, accionesGrabadas));
+}
+
+function obtenerAccionGrabadaCorrespondiente(accionMapeada, accionesGrabadas) {
+  if (!accionMapeada?.selector) return false;
+  const tipoMapeado = normalizarTipoAccion(accionMapeada.accion || accionMapeada.tipo || "click");
+  const selectorMapeado = normalizarTextoComparacion(accionMapeada.selector);
+
+  return normalizarAcciones(accionesGrabadas).find((accionGrabada) => {
+    if (!accionGrabadaEsEjecutableSegura(accionGrabada)) return false;
+    const mismoSelector = normalizarTextoComparacion(accionGrabada.selector) === selectorMapeado;
+    if (!mismoSelector) return false;
+
+    const tipoGrabado = normalizarTipoAccion(accionGrabada.tipo);
+    return tiposCompatibles(tipoMapeado, tipoGrabado);
+  }) || null;
+}
+
+function normalizarTipoAccion(tipo) {
+  const t = String(tipo || "click").toLowerCase();
+  if (t === "fill") return "input";
+  return t;
+}
+
+function tiposCompatibles(tipoMapeado, tipoGrabado) {
+  if (tipoMapeado === tipoGrabado) return true;
+  if (tipoMapeado === "click" && tipoGrabado === "submit") return true;
+  if (tipoMapeado === "submit" && tipoGrabado === "click") return true;
+  return false;
+}
+
+function normalizarTextoComparacion(valor) {
+  return String(valor || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function accionGrabadaEsEjecutableSegura(accion) {
+  if (!accion?.selector) return false;
+  const tipo = normalizarTipoAccion(accion.tipo);
+  if (tipo !== "click" && tipo !== "submit" && tipo !== "input" && tipo !== "change") return false;
+
+  if (tipo === "click" || tipo === "submit") {
+    const texto = normalizarTextoComparacion([
+      accion.texto,
+      accion.nombreCampo,
+      accion.contexto,
+    ].filter(Boolean).join(" "));
+
+    if (textoContieneComandosContradictorios(texto)) {
+      console.warn("[Edy] Accion ambigua descartada:", texto);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function textoContieneComandosContradictorios(texto) {
+  if (!texto) return false;
+  const positivos = [
+    "continuar", "continue", "siguiente", "next", "guardar", "save",
+    "confirmar", "confirm", "submit", "checkout", "place order",
+  ];
+  const negativos = [
+    "cancelar", "cancel", "regresar", "back", "eliminar", "delete", "remove",
+  ];
+
+  return positivos.some((palabra) => texto.includes(palabra)) &&
+    negativos.some((palabra) => texto.includes(palabra));
 }
 
 // ─── DOM helpers ──────────────────────────────────────────────────────────────
@@ -420,19 +507,46 @@ async function encontrarOAbrirTab(url) {
   try { urlObj = new URL(url); } catch { throw new Error("URL inválida: " + url); }
 
   const tabs = await chrome.tabs.query({});
+  const sameUrl = tabs.find((t) => {
+    try { return urlsEquivalentes(t.url, url); } catch { return false; }
+  });
+
+  if (sameUrl) {
+    await chrome.tabs.update(sameUrl.id, { active: true });
+    await esperarTabLista(sameUrl.id);
+    return sameUrl.id;
+  }
+
   const existing = tabs.find((t) => {
     try { return new URL(t.url).origin === urlObj.origin; } catch { return false; }
   });
 
   if (existing) {
-    await chrome.tabs.update(existing.id, { active: true });
-    await esperar(300);
+    await chrome.tabs.update(existing.id, { active: true, url });
+    await esperarTabLista(existing.id);
     return existing.id;
   }
 
   const newTab = await chrome.tabs.create({ url });
-  await esperarTabCargada(newTab.id);
+  await esperarTabLista(newTab.id);
   return newTab.id;
+}
+
+function urlsEquivalentes(actual, esperado) {
+  const a = new URL(actual);
+  const b = new URL(esperado);
+  a.hash = "";
+  b.hash = "";
+  return a.href === b.href;
+}
+
+async function esperarTabLista(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab?.status === "loading") {
+    await esperarTabCargada(tabId);
+  } else {
+    await esperar(300);
+  }
 }
 
 function esperarTabCargada(tabId, timeout = 15000) {
@@ -463,14 +577,36 @@ async function enviarAAppsScript(payload, appsScriptUrl) {
     throw new Error("Apps Script respondio " + respuesta.status);
   }
 
-  return respuesta.text();
+  const texto = await respuesta.text();
+  let json = null;
+
+  try {
+    json = JSON.parse(texto);
+  } catch {
+    json = { ok: true, raw: texto };
+  }
+
+  if (json && json.ok === false) {
+    throw new Error(json.error || "Apps Script respondio ok=false.");
+  }
+
+  await guardarLocal({
+    [STORAGE_KEYS.ultimoEnvioSheets]: {
+      ok: true,
+      url,
+      respuesta: json,
+      fecha: new Date().toISOString(),
+    },
+  });
+
+  return json;
 }
 
 async function obtenerPedidosBackendUrl() {
-  const { [STORAGE_KEYS.geminiBackendUrl]: storedBackendUrl } = await chrome.storage.local.get(
-    STORAGE_KEYS.geminiBackendUrl
+  const { [STORAGE_KEYS.backendUrl]: storedBackendUrl } = await chrome.storage.local.get(
+    STORAGE_KEYS.backendUrl
   );
-  const backendUrl = storedBackendUrl || DEFAULT_GEMINI_BACKEND_URL;
+  const backendUrl = storedBackendUrl || DEFAULT_BACKEND_URL;
 
   try {
     return new URL("/api/pedidos", backendUrl).toString();
@@ -553,13 +689,17 @@ async function inyectarGrabador(tabId) {
 
       const TEXT_INPUT_TYPES = new Set(['text','password','email','number','search','tel','url','date','time','']);
 
+      let lastClickRecordedAt = 0;
+
       const onClick = (e) => {
         const tag  = e.target.tagName?.toLowerCase();
         const type = (e.target.type || "").toLowerCase();
         // Skip clicks on text inputs — input events cover those
         if ((tag === 'input' && TEXT_INPUT_TYPES.has(type)) || tag === 'textarea') return;
         // Bubble up to nearest real interactive ancestor
-        const el = e.target.closest(INTERACTIVE) || e.target;
+        const el = e.target.closest(INTERACTIVE);
+        if (!el) return;
+        lastClickRecordedAt = Date.now();
         guardar("click", el);
       };
 
@@ -572,7 +712,10 @@ async function inyectarGrabador(tabId) {
           guardar("change", e.target);
         }
       };
-      const onSubmit = (e) => guardar("submit", e.target);
+      const onSubmit = (e) => {
+        if (Date.now() - lastClickRecordedAt < 800) return;
+        guardar("submit", e.target);
+      };
 
       window.__edyRecorderHandlers = { onClick, onInput, onChange, onSubmit };
       document.addEventListener("click",  onClick,  true);
@@ -763,17 +906,6 @@ async function enviarATodos(mensaje) {
     ? chrome.tabs.sendMessage(t.id, mensaje).catch(() => {})
     : Promise.resolve()
   ));
-}
-
-async function enviarAAppsScript(payload, url) {
-  if (!url) return null;
-  const resp = await fetch(url, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify(payload),
-  });
-  if (!resp.ok) throw new Error("Apps Script respondió " + resp.status);
-  return resp.text();
 }
 
 function guardarLocal(datos) { return chrome.storage.local.set(datos); }

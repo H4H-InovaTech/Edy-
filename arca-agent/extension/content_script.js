@@ -45,6 +45,7 @@
   let isRecording    = false;
   let recordedActions = [];
   let recorderHandlers = null;
+  let lastClickRecordedAt = 0;
 
   const INTERACTIVE =
     'button, a, [role="button"], [role="link"], [role="menuitem"], ' +
@@ -151,8 +152,13 @@
         return;
       }
       let el;
-      try { el = e.target.closest(INTERACTIVE) || e.target; }
+      try { el = e.target.closest(INTERACTIVE); }
       catch (err) { el = e.target; console.warn('[Edy] closest() failed:', err); }
+      if (!el) {
+        console.log('[Edy] onClick: skipped — no interactive element');
+        return;
+      }
+      lastClickRecordedAt = Date.now();
       console.log('[Edy] click capturado →', el.tagName, '#' + (el.id || '?'), el.getAttribute('data-test') || el.textContent?.trim().slice(0, 30) || '');
       registrarAccion('click', el);
     };
@@ -175,6 +181,10 @@
 
     const onSubmit = (e) => {
       if (!isRecording) return;
+      if (Date.now() - lastClickRecordedAt < 800) {
+        console.log('[Edy] onSubmit: skipped — click already captured');
+        return;
+      }
       console.log('[Edy] onSubmit:', e.target.id || e.target.action || '');
       registrarAccion('submit', e.target);
     };
@@ -356,6 +366,15 @@
     sendMsg({ tipo: 'iniciar_ejecucion' });
   });
 
+  widget.onReejecutar(async () => {
+    const storage = await getLocal(['mapeo_aprendido']);
+    const mapeo   = storage['mapeo_aprendido'];
+    const pasos   = (mapeo?.pasos || []).map(p => p.nombre).filter(Boolean);
+    widget.renderPasos(pasos.length ? pasos : ['Reiniciando automatización…']);
+    widget.mostrarEstado('ejecutando');
+    sendMsg({ tipo: 'volver_a_ejecutar' });
+  });
+
   widget.onDashboard(() => {
     sendMsg({ tipo: 'abrir_dashboard' });
   });
@@ -431,6 +450,11 @@
 
       case 'paso_completado':
         widget.marcarPasoCompletado(msg.paso);
+        break;
+
+      case 'ejecucion_completada':
+        wasExecuting = false;
+        widget.mostrarEstado('completado');
         break;
     }
   });

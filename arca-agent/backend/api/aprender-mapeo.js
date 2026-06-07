@@ -42,7 +42,14 @@ export default async function handler(req, res) {
       });
     }
 
-    const mapeo = await aprenderMapeoConGemini(payload.acciones || []);
+    if (!Array.isArray(payload.acciones) || payload.acciones.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "No llegaron acciones para aprender el mapeo.",
+      });
+    }
+
+    const mapeo = await aprenderMapeoConGemini(payload.acciones);
     return res.status(200).json({ ok: true, mapeo });
   } catch (error) {
     console.error("[api/aprender-mapeo]", error);

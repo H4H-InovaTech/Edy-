@@ -243,7 +243,8 @@
           <div class="titulo titulo-ok">¡Flujo completado!</div>
           <div class="subtitulo">Edy automatizó este proceso</div>
           <div class="botones" style="margin-top:16px;">
-            <button id="btn-nuevo" class="btn-rojo">● Nuevo proceso</button>
+            <button id="btn-reejecutar" class="btn-rojo">▶ Volver a ejecutar</button>
+            <button id="btn-nuevo" class="btn-outline">● Nuevo proceso</button>
           </div>
         </section>
 
@@ -292,6 +293,7 @@
   const btnDashboard = $("#btn-dashboard");
   const btnPausar = $("#btn-pausar");
   const btnNuevo = $("#btn-nuevo");
+  const btnReejecutar = $("#btn-reejecutar");
   const listaCampos = $("#lista-campos");
   const contadorCampos = $("#contador-campos");
   const barraObs = $("#barra-obs");
@@ -420,6 +422,7 @@
   let cbDashboard = noop;
   let cbPausar = noop;
   let cbNuevo = noop;
+  let cbReejecutar = noop;
   btnObservar.addEventListener("click", () => cbObservar());
   btnDetener.addEventListener("click", () => cbDetener());
   btnEjecutar.addEventListener("click", () => {
@@ -430,6 +433,7 @@
   btnRegrabar.addEventListener("click", () => cbObservar());
   btnDashboard.addEventListener("click", () => cbDashboard());
   btnPausar.addEventListener("click", () => cbPausar());
+  btnReejecutar.addEventListener("click", () => cbReejecutar());
   btnNuevo.addEventListener("click", () => {
     habilitarEjecutar(false);
     mostrarEstado("idle");
@@ -452,6 +456,7 @@
     onDashboard: (cb) => (cbDashboard = cb || noop),
     onPausar: (cb) => (cbPausar = cb || noop),
     onNuevo: (cb) => (cbNuevo = cb || noop),
+    onReejecutar: (cb) => (cbReejecutar = cb || noop),
   };
 
   // Arranque: colapsado mostrando el FAB en estado idle.

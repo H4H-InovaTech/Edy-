@@ -1,6 +1,8 @@
 const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash-lite";
 
-export async function aprenderMapeoConGemini(acciones) {
+export async function aprenderMapeoConGemini(input) {
+  const acciones = Array.isArray(input) ? input : input?.acciones;
+
   if (!Array.isArray(acciones) || acciones.length === 0) {
     throw new Error("No llegaron acciones para aprender el mapeo.");
   }
@@ -52,6 +54,9 @@ function crearPromptMapeo(acciones) {
     "Detecta campos como cliente_id, sku, cantidad, direccion, fecha_entrega, pedido_id y cualquier otro campo relevante.",
     "Conserva selectores CSS utiles para reproducir las acciones.",
     "Si una accion tiene valor capturado, mantenlo en el paso correspondiente.",
+    "No inventes acciones ni botones que no aparezcan en las acciones grabadas.",
+    "Si la pagina contiene botones alternativos como Cancelar, Regresar o Eliminar, incluyelos SOLO si el usuario realmente hizo click en ellos durante la grabacion.",
+    "Cada paso ejecutable debe venir de una accion grabada. Usa los botones visibles solo como contexto, no como instrucciones nuevas.",
     "Responde SOLO JSON valido, sin markdown, sin explicaciones.",
     "La estructura exacta debe ser:",
     JSON.stringify({
