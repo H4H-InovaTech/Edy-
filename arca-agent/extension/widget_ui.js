@@ -261,7 +261,7 @@
             <div class="mascota-disco"><img src="${icono("EdySonriente.png")}" alt="Edy ejecutando"></div>
           </div>
           <div class="titulo">Ejecutando solo...</div>
-          <div class="subtitulo" id="orden-info">Orden #C-4821 · OXXO La Pastora</div>
+          <div class="subtitulo" id="orden-info">Preparando orden...</div>
           <div class="progreso"><div class="barra" id="barra-eje"></div></div>
           <div id="lista-pasos"></div>
           <div class="botones" style="flex-direction: column;">
@@ -299,6 +299,7 @@
   const barraObs = $("#barra-obs");
   const listaPasos = $("#lista-pasos");
   const barraEje = $("#barra-eje");
+  const ordenInfo = $("#orden-info");
 
   let campos = [];
   let totalPasos = 0;
@@ -333,6 +334,10 @@
   // Actualiza el resumen del estado aprendido (ej: "4 campos · 5 pasos")
   function setResumenAprendido(texto) {
     if (texto) aprendidoResumen.textContent = texto;
+  }
+
+  function setOrdenInfo(texto) {
+    ordenInfo.textContent = texto || "Preparando orden...";
   }
 
   // ---------- Confeti ----------
@@ -453,6 +458,7 @@
     marcarPasoCompletado,
     habilitarEjecutar,
     setResumenAprendido,
+    setOrdenInfo,
     onObservar: (cb) => (cbObservar = cb || noop),
     onDetener: (cb) => (cbDetener = cb || noop),
     onEjecutar: (cb) => (cbEjecutar = cb || noop),

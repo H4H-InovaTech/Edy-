@@ -24,6 +24,7 @@ let camposCount = 0;
 // ─── Ejecutando UI ───────────────────────────────────────────────────────────
 const listaPasos = document.getElementById('lista-pasos');
 const barraEje   = document.getElementById('barra-eje');
+const ordenInfo  = document.getElementById('orden-info');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STATE
@@ -159,6 +160,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     case 'campo_detectado':  agregarCampo(msg.nombre, msg.time); break;
     case 'paso_actual':      marcarPasoActual(msg.paso);         break;
     case 'paso_completado':  marcarPasoCompletado(msg.paso);     break;
+    case 'orden_actual':     ordenInfo.textContent = 'Orden #' + msg.orden; break;
     case 'aprendizaje_ok':   _habilitarEjecutar(true);           break;
   }
 });

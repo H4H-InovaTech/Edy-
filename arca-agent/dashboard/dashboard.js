@@ -137,7 +137,7 @@ function renderTabla(hayNuevos = false) {
     else if (skus !== "—") skus = skus + " SKUs";
 
     // Importe: formatear si es número
-    let importe = r.importe || r.monto || "—";
+    let importe = r.importe_total || r.importe || r.monto || "—";
     if (importe !== "—" && !isNaN(importe)) {
       importe =
         "$ " +

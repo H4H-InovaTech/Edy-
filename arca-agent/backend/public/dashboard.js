@@ -61,7 +61,7 @@ function actualizarStats() {
 
   // Campos capturados: cuenta todas las celdas que no sean "—" ni vacías,
   // excluyendo timestamp, estado y portal (son de control, no datos del proceso)
-  const EXCLUIR = new Set(["timestamp", "estado", "portal"]);
+  const EXCLUIR = new Set(["timestamp", "estado", "portal", "ejecutado_por", "tiempo_ahorrado", "datos_completos"]);
   const campos = todosLosRegistros.reduce((acc, r) => {
     return acc + Object.entries(r).filter(
       ([k, v]) => !EXCLUIR.has(k) && v && v !== "—"
@@ -136,7 +136,7 @@ function renderTabla(hayNuevos = false) {
     else if (skus !== "—") skus = skus + " SKUs";
 
     // Importe: formatear si es número
-    let importe = r.importe || r.monto || "—";
+    let importe = r.importe_total || r.importe || r.monto || "—";
     if (importe !== "—" && !isNaN(importe)) {
       importe =
         "$ " +

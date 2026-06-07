@@ -52,6 +52,8 @@ function crearPromptMapeo(acciones) {
     "Eres el cerebro de un agente RPA llamado Edy para Arca Agent.",
     "Tu trabajo es leer acciones grabadas en una pagina web e inferir un mapeo semantico.",
     "Detecta campos como cliente_id, sku, cantidad, direccion, fecha_entrega, pedido_id y cualquier otro campo relevante.",
+    "Aprende equivalencias aunque el origen y destino usen nombres distintos. Ejemplos: Product Name equivale a Nombre del Articulo; Price equivale a Costo Unitario; Quantity equivale a Cantidad; Zip Code equivale a Codigo Postal.",
+    "Para cada campo, incluye nombre_origen, nombre_destino si lo puedes inferir, nombre_semantico canonico y aliases utiles.",
     "Conserva selectores CSS utiles para reproducir las acciones.",
     "Si una accion tiene valor capturado, mantenlo en el paso correspondiente.",
     "No inventes acciones ni botones que no aparezcan en las acciones grabadas.",
@@ -62,7 +64,10 @@ function crearPromptMapeo(acciones) {
     JSON.stringify({
       campos: [
         {
-          nombre_semantico: "cliente_id",
+          nombre_origen: "Product Name",
+          nombre_destino: "Nombre del Articulo",
+          nombre_semantico: "product_name",
+          aliases: ["producto", "articulo", "item_name"],
           selector: "#cliente",
           evidencia: "label, placeholder o texto usado para inferirlo",
         },

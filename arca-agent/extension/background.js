@@ -18,6 +18,7 @@ const STORAGE_KEYS = {
   mapeo:        "mapeo_aprendido",
   backendUrl:   "geminiBackendUrl",
   appsScriptUrl:"appsScriptUrl",
+  datosNuevos:  "datos_nuevos",
   ultimoPedido: "ultimo_pedido",
   ultimoEnvioSheets: "ultimo_envio_sheets",
   originTabId:  "origin_tab_id",
@@ -105,6 +106,7 @@ async function iniciarGrabacion(tabId) {
     [STORAGE_KEYS.estado]:         estado,
     [STORAGE_KEYS.acciones]:       [],
     [STORAGE_KEYS.mapeo]:          null,
+    [STORAGE_KEYS.datosNuevos]:    {},
     [STORAGE_KEYS.originTabId]:    originTabId,
     [STORAGE_KEYS.originUrl]:      originUrl,
     [STORAGE_KEYS.originSnapshot]: [],
@@ -235,6 +237,7 @@ async function iniciarEjecucion(callerTabId) {
 
   const mapeo   = storage[STORAGE_KEYS.mapeo];
   const acciones = normalizarAcciones(storage[STORAGE_KEYS.acciones] || accionesGrabadas);
+  const numeroOrden = obtenerNumeroOrden(mapeo, acciones);
 
   if (!mapeo && !acciones.length) {
     throw new Error("Sin mapeo ni acciones. Observa el proceso primero.");
@@ -244,11 +247,15 @@ async function iniciarEjecucion(callerTabId) {
   await chrome.action.setIcon({ path: ICONOS.pensando });
   await guardarLocal({ [STORAGE_KEYS.estado]: estado });
 
-  const plan = construirPlanEjecucion(mapeo, acciones);
+  const datosNuevos = generarDatosNuevosAutomaticos(acciones);
+  await guardarLocal({ [STORAGE_KEYS.datosNuevos]: datosNuevos });
+
+  const plan = aplicarDatosNuevosAlPlan(construirPlanEjecucion(mapeo, acciones), datosNuevos);
   if (!plan.length) {
     throw new Error("No hay pasos ejecutables. Graba el flujo otra vez desde el inicio.");
   }
   await enviarATodos({ tipo: "estado_agente", estado, totalAcciones: plan.length });
+  await enviarATodos({ tipo: "orden_actual", orden: numeroOrden });
 
   // Navigate to the supplier portal and start fresh
   const portalUrl = mapeo?.portal_url || storage[STORAGE_KEYS.originUrl];
@@ -286,17 +293,32 @@ async function iniciarEjecucion(callerTabId) {
 
   // Build and send order record to Google Sheets
   const portalHostname = portalUrl ? new URL(portalUrl).hostname : "desconocido";
+  const accionesEjecutadas = plan.flatMap((paso) => paso.acciones || []);
+  const camposTranscritos = construirCamposTranscritos(accionesEjecutadas);
+  const camposSeleccionados = construirCamposSeleccionados(accionesEjecutadas);
+  const datosPedidoAprendidos = normalizarDatosPedido(mapeo?.datos_pedido);
+  const preciosAprendidos = construirPreciosDesdeDatosPedido(datosPedidoAprendidos);
+  datosRecopilados = {
+    ...datosPedidoAprendidos,
+    ...camposSeleccionados,
+    ...preciosAprendidos,
+    ...camposTranscritos,
+    ...datosRecopilados,
+  };
+  const importeTotal = obtenerImporteTotal(datosRecopilados, camposSeleccionados, preciosAprendidos, datosPedidoAprendidos);
+
   const payload = {
     timestamp:          new Date().toISOString(),
     portal:             portalHostname,
     ejecutado_por:      "Edy",
-    orden:              datosRecopilados.orden_id || "EDY-" + Date.now().toString().slice(-6),
+    orden:              numeroOrden,
     cliente:            datosRecopilados.cliente  || portalHostname,
-    skus:               datosRecopilados.productos_ordenados || datosRecopilados.productos || "—",
-    importe:            datosRecopilados.total    || datosRecopilados.subtotal || "—",
+    skus:               datosRecopilados.productos_ordenados || datosRecopilados.productos || datosRecopilados.sku || "—",
     estado:             "Completada",
     tiempo_ahorrado:    3.5,
-    datos_completos:    JSON.stringify(datosRecopilados),
+    importe_total:      importeTotal || "",
+    ...camposSeleccionados,
+    ...camposTranscritos,
   };
 
   await guardarLocal({ [STORAGE_KEYS.ultimoPedido]: payload });
@@ -379,7 +401,10 @@ function construirPlanEjecucion(mapeo, acciones) {
       .map((paso) => ({
         nombre:  paso.nombre || "Paso",
         acciones: paso.acciones
-          .map((accionMapeada) => obtenerAccionGrabadaCorrespondiente(accionMapeada, accionesGrabadas))
+          .map((accionMapeada) => prepararAccionMapeadaParaEjecucion(
+            accionMapeada,
+            obtenerAccionGrabadaCorrespondiente(accionMapeada, accionesGrabadas)
+          ))
           .filter(Boolean),
       }))
       .filter((paso) => paso.acciones.length > 0);
@@ -391,7 +416,10 @@ function construirPlanEjecucion(mapeo, acciones) {
       .filter((paso) => paso.selector)
       .map((paso) => ({
         paso,
-        accionGrabada: obtenerAccionGrabadaCorrespondiente(paso, accionesGrabadas),
+        accionGrabada: prepararAccionMapeadaParaEjecucion(
+          paso,
+          obtenerAccionGrabadaCorrespondiente(paso, accionesGrabadas)
+        ),
       }))
       .filter(({ accionGrabada }) => accionGrabada)
       .map((paso, i) => ({
@@ -415,6 +443,154 @@ function construirPlanEjecucion(mapeo, acciones) {
   return grupos.map((g) => ({ nombre: g.nombre, acciones: g.acciones }));
 }
 
+function generarDatosNuevosAutomaticos(acciones) {
+  const datos = {};
+
+  normalizarAcciones(acciones).forEach((accion, index) => {
+    const tipo = normalizarTipoAccion(accion.tipo);
+    if (tipo !== "input" && tipo !== "change") return;
+    if (!accion.selector) return;
+
+    const valor = generarValorNuevoParaAccion(accion, index);
+    if (valor === undefined || valor === null) return;
+    datos[accion.selector] = valor;
+  });
+
+  console.log("[Edy] datos_nuevos generados:", Object.keys(datos).length, datos);
+  return datos;
+}
+
+function generarValorNuevoParaAccion(accion, index) {
+  const original = String(accion.valor ?? "");
+  const textoCampo = normalizarNombreCampoSheets([
+    accion.nombreCampo,
+    accion.texto,
+    selectorANombreCampo(accion.selector),
+  ].filter(Boolean).join(" "));
+  const semantico = normalizarCampoSemantico(textoCampo);
+  const texto = [textoCampo, semantico].filter(Boolean).join("_");
+
+  if (contieneCampo(texto, ["first_name", "firstname", "nombre", "name"]) &&
+      !contieneCampo(texto, ["last_name", "lastname", "apellido", "email", "username", "user_name"])) {
+    return asegurarValorDistinto("Maria", original, "Ana");
+  }
+
+  if (contieneCampo(texto, ["last_name", "lastname", "apellido", "surname"])) {
+    return asegurarValorDistinto("Lopez", original, "Garcia");
+  }
+
+  if (contieneCampo(texto, ["full_name", "customer", "cliente", "client", "nombre_cliente"])) {
+    return asegurarValorDistinto("Maria Lopez", original, "Ana Garcia");
+  }
+
+  if (contieneCampo(texto, ["email", "correo", "mail"])) {
+    return asegurarValorDistinto("maria.lopez.edy@example.com", original, "ana.garcia.edy@example.com");
+  }
+
+  if (contieneCampo(texto, ["password", "contrasena", "pass"])) {
+    return asegurarValorDistinto("EdyDemo2026!", original, "EdyDemo2026#");
+  }
+
+  if (contieneCampo(texto, ["zip_code", "postal_code", "zipcode", "codigo_postal", "cp", "zip", "postal"])) {
+    return asegurarValorDistinto("67890", original, "64000");
+  }
+
+  if (contieneCampo(texto, ["phone", "telefono", "tel", "mobile", "celular"])) {
+    return asegurarValorDistinto("8185550199", original, "8185550123");
+  }
+
+  if (contieneCampo(texto, ["address", "direccion", "street", "calle"])) {
+    return asegurarValorDistinto("Av Nueva 123", original, "Calle Demo 456");
+  }
+
+  if (contieneCampo(texto, ["city", "ciudad", "municipio"])) {
+    return asegurarValorDistinto("Monterrey", original, "Guadalupe");
+  }
+
+  if (contieneCampo(texto, ["state", "estado", "province", "provincia"])) {
+    return asegurarValorDistinto("Nuevo Leon", original, "Jalisco");
+  }
+
+  if (contieneCampo(texto, ["country", "pais"])) {
+    return asegurarValorDistinto("Mexico", original, "Canada");
+  }
+
+  if (contieneCampo(texto, ["quantity", "qty", "cantidad", "unidades"])) {
+    return asegurarValorDistinto(incrementarNumeroTexto(original, 1, "2"), original, "3");
+  }
+
+  if (normalizarTipoAccion(accion.tipo) === "change") {
+    return undefined;
+  }
+
+  if (pareceNumero(original)) {
+    return asegurarValorDistinto(incrementarNumeroTexto(original, 1, "2"), original, "3");
+  }
+
+  if (original.includes("@")) {
+    return asegurarValorDistinto("maria.lopez.edy@example.com", original, "ana.garcia.edy@example.com");
+  }
+
+  if (original.trim()) {
+    return asegurarValorDistinto(original.trim() + " nuevo", original, "Dato nuevo " + (index + 1));
+  }
+
+  return "Dato nuevo " + (index + 1);
+}
+
+function aplicarDatosNuevosAlPlan(plan, datosNuevos) {
+  if (!Array.isArray(plan) || !datosNuevos || typeof datosNuevos !== "object") return plan;
+
+  let overridesAplicados = 0;
+  const planConDatosNuevos = plan.map((paso) => ({
+    ...paso,
+    acciones: (paso.acciones || []).map((accion) => {
+      const tipo = normalizarTipoAccion(accion.tipo);
+      if (tipo !== "input" && tipo !== "change") return accion;
+
+      const selectorConOverride = [accion.selectorGrabado, accion.selector]
+        .filter(Boolean)
+        .find((selector) => Object.prototype.hasOwnProperty.call(datosNuevos, selector));
+
+      if (!selectorConOverride) return accion;
+
+      overridesAplicados++;
+      return {
+        ...accion,
+        valor: datosNuevos[selectorConOverride],
+      };
+    }),
+  }));
+
+  console.log("[Edy] datos_nuevos aplicados:", overridesAplicados);
+  return planConDatosNuevos;
+}
+
+function contieneCampo(texto, opciones) {
+  return opciones.some((opcion) => texto.includes(opcion));
+}
+
+function asegurarValorDistinto(candidato, original, alternativo) {
+  const valor = String(candidato ?? "");
+  const previo = String(original ?? "");
+  if (valor.trim() !== previo.trim()) return valor;
+
+  const alt = String(alternativo ?? "");
+  if (alt.trim() && alt.trim() !== previo.trim()) return alt;
+
+  return valor ? valor + " 2" : "Dato nuevo";
+}
+
+function pareceNumero(valor) {
+  return /^-?\d+(?:[.,]\d+)?$/.test(String(valor || "").trim());
+}
+
+function incrementarNumeroTexto(valor, incremento, fallback) {
+  const numero = Number(String(valor || "").replace(",", "."));
+  if (!Number.isFinite(numero)) return fallback;
+  return String(numero + incremento);
+}
+
 function filtrarAccionesNoGrabadas(accionesMapeadas, accionesGrabadas) {
   if (!Array.isArray(accionesMapeadas)) return [];
   if (!Array.isArray(accionesGrabadas) || accionesGrabadas.length === 0) return accionesMapeadas;
@@ -425,18 +601,67 @@ function accionMapeadaFueGrabada(accionMapeada, accionesGrabadas) {
   return Boolean(obtenerAccionGrabadaCorrespondiente(accionMapeada, accionesGrabadas));
 }
 
+function prepararAccionMapeadaParaEjecucion(accionMapeada, accionGrabada) {
+  if (!accionGrabada) return null;
+
+  const tipoMapeado = normalizarTipoAccion(accionMapeada.accion || accionMapeada.tipo || accionGrabada.tipo);
+  if (tipoMapeado !== "input" && tipoMapeado !== "change") return accionGrabada;
+
+  return {
+    ...accionGrabada,
+    tipo: tipoMapeado,
+    selector: accionMapeada.selector || accionGrabada.selector,
+    selectorGrabado: accionGrabada.selector,
+    nombreCampo:
+      accionMapeada.nombre_destino ||
+      accionMapeada.campo ||
+      accionMapeada.nombreCampo ||
+      accionMapeada.nombre ||
+      accionGrabada.nombreCampo,
+    etiqueta:
+      accionMapeada.nombre_destino ||
+      accionMapeada.nombre_origen ||
+      accionMapeada.nombre_semantico ||
+      accionGrabada.nombreCampo,
+    aliases: [
+      accionMapeada.nombre_origen,
+      accionMapeada.nombre_destino,
+      accionMapeada.nombre_semantico,
+      ...(Array.isArray(accionMapeada.aliases) ? accionMapeada.aliases : []),
+    ].filter(Boolean),
+  };
+}
+
 function obtenerAccionGrabadaCorrespondiente(accionMapeada, accionesGrabadas) {
   if (!accionMapeada?.selector) return false;
   const tipoMapeado = normalizarTipoAccion(accionMapeada.accion || accionMapeada.tipo || "click");
   const selectorMapeado = normalizarTextoComparacion(accionMapeada.selector);
+  const campoMapeado = normalizarCampoSemantico(
+    accionMapeada.nombre_semantico ||
+    accionMapeada.nombre_destino ||
+    accionMapeada.nombre_origen ||
+    accionMapeada.campo ||
+    accionMapeada.nombreCampo ||
+    accionMapeada.nombre ||
+    ""
+  );
 
   return normalizarAcciones(accionesGrabadas).find((accionGrabada) => {
     if (!accionGrabadaEsEjecutableSegura(accionGrabada)) return false;
-    const mismoSelector = normalizarTextoComparacion(accionGrabada.selector) === selectorMapeado;
-    if (!mismoSelector) return false;
 
     const tipoGrabado = normalizarTipoAccion(accionGrabada.tipo);
-    return tiposCompatibles(tipoMapeado, tipoGrabado);
+    if (!tiposCompatibles(tipoMapeado, tipoGrabado)) return false;
+
+    const mismoSelector = normalizarTextoComparacion(accionGrabada.selector) === selectorMapeado;
+    if (mismoSelector) return true;
+
+    if (tipoMapeado !== "input" && tipoMapeado !== "change") return false;
+
+    const campoGrabado = normalizarCampoSemantico(
+      accionGrabada.nombreCampo || accionGrabada.texto || selectorANombreCampo(accionGrabada.selector)
+    );
+
+    return Boolean(campoMapeado && campoGrabado && campoMapeado === campoGrabado);
   }) || null;
 }
 
@@ -455,6 +680,41 @@ function tiposCompatibles(tipoMapeado, tipoGrabado) {
 
 function normalizarTextoComparacion(valor) {
   return String(valor || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizarCampoSemantico(valor) {
+  const base = normalizarNombreCampoSheets(valor);
+  if (!base) return "";
+
+  const aliases = {
+    product_name: [
+      "product_name", "product", "producto", "nombre_producto", "nombre_del_producto",
+      "nombre_articulo", "nombre_del_articulo", "articulo", "item", "item_name",
+      "inventory_item_name",
+    ],
+    unit_price: [
+      "price", "precio", "costo", "unit_price", "precio_unitario", "costo_unitario",
+      "monto_unitario", "valor_unitario",
+    ],
+    quantity: [
+      "quantity", "qty", "cantidad", "unidades", "numero_de_unidades",
+    ],
+    zip_code: [
+      "zip", "zip_code", "zipcode", "postal_code", "codigo_postal", "cp",
+    ],
+    customer: [
+      "customer", "cliente", "client", "nombre_cliente", "customer_name",
+    ],
+    sku: [
+      "sku", "codigo_sku", "codigo_producto", "product_code", "item_code",
+    ],
+  };
+
+  for (const [canonico, opciones] of Object.entries(aliases)) {
+    if (opciones.includes(base)) return canonico;
+  }
+
+  return base;
 }
 
 function accionGrabadaEsEjecutableSegura(accion) {
@@ -490,6 +750,250 @@ function textoContieneComandosContradictorios(texto) {
 
   return positivos.some((palabra) => texto.includes(palabra)) &&
     negativos.some((palabra) => texto.includes(palabra));
+}
+
+function construirCamposTranscritos(acciones) {
+  const campos = {};
+  const usadosPorSelector = new Map();
+
+  for (const accion of normalizarAcciones(acciones)) {
+    const tipo = normalizarTipoAccion(accion.tipo);
+    if (tipo !== "input" && tipo !== "change") continue;
+    if (accion.valor === undefined || accion.valor === null || String(accion.valor).trim() === "") continue;
+
+    const nombreBase = normalizarNombreCampoSheets(
+      accion.nombreCampo || accion.texto || selectorANombreCampo(accion.selector)
+    );
+    if (!nombreBase) continue;
+
+    const selectorKey = normalizarTextoComparacion(accion.selector);
+    const nombre = usadosPorSelector.get(selectorKey) || siguienteNombreDisponible(nombreBase, campos);
+    usadosPorSelector.set(selectorKey, nombre);
+    campos[nombre] = accion.valor;
+  }
+
+  return campos;
+}
+
+function normalizarDatosPedido(datosPedido) {
+  if (!datosPedido || typeof datosPedido !== "object") return {};
+
+  const normalizados = {};
+  for (const [key, value] of Object.entries(datosPedido)) {
+    const nombre = normalizarNombreCampoSheets(key);
+    if (!nombre) continue;
+    normalizados[nombre] = Array.isArray(value) ? value.join(", ") : value;
+  }
+
+  return normalizados;
+}
+
+function obtenerNumeroOrden(mapeo, acciones) {
+  const datosPedido = normalizarDatosPedido(mapeo?.datos_pedido);
+  const candidatos = [
+    datosPedido.orden_id,
+    datosPedido.order_id,
+    datosPedido.numero_orden,
+    datosPedido.order_number,
+    datosPedido.pedido_id,
+    datosPedido.id_pedido,
+  ];
+
+  for (const candidato of candidatos) {
+    if (candidato !== undefined && candidato !== null && String(candidato).trim()) {
+      return String(candidato).trim();
+    }
+  }
+
+  const primeraAccionId = normalizarAcciones(acciones)[0]?.id || "";
+  const seed = primeraAccionId ? primeraAccionId.replace(/[^a-z0-9]/gi, "").slice(-6) : Date.now().toString().slice(-6);
+  return "EDY-" + seed.toUpperCase();
+}
+
+function obtenerImporteTotal(...fuentes) {
+  const posiblesNombres = [
+    "total",
+    "importe_total",
+    "subtotal",
+    "precio_total",
+    "total_compra",
+    "order_total",
+    "cart_total",
+    "checkout_total",
+    "producto_precio",
+  ];
+
+  for (const fuente of fuentes) {
+    if (!fuente || typeof fuente !== "object") continue;
+    for (const nombre of posiblesNombres) {
+      const valor = fuente[nombre];
+      if (valor !== undefined && valor !== null && String(valor).trim() !== "" && String(valor).trim() !== "—") {
+        return formatearImporte(valor);
+      }
+    }
+  }
+
+  return "";
+}
+
+function construirPreciosDesdeDatosPedido(datosPedido) {
+  const skus = extraerLista(datosPedido?.sku || datosPedido?.skus || datosPedido?.productos || datosPedido?.productos_ordenados);
+  if (!skus.length) return {};
+
+  const precios = skus
+    .map((sku) => precioConocidoProducto(sku))
+    .filter(Boolean);
+
+  if (!precios.length) return {};
+
+  const campos = {};
+  precios.forEach((precio, index) => {
+    const sufijo = precios.length > 1 ? "_" + (index + 1) : "";
+    campos["producto_precio" + sufijo] = precio;
+  });
+
+  campos.productos_precios = precios.join(", ");
+  campos.importe_total = sumarPrecios(precios);
+
+  return campos;
+}
+
+function extraerLista(valor) {
+  if (Array.isArray(valor)) return valor.map(String).filter(Boolean);
+  if (valor === undefined || valor === null) return [];
+  return String(valor)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function precioConocidoProducto(nombreOsku) {
+  const key = normalizarTextoComparacion(nombreOsku)
+    .replace(/_/g, "-")
+    .replace(/\s+/g, "-");
+
+  const precios = {
+    "sauce-labs-backpack": "29.99",
+    "sauce-labs-bike-light": "9.99",
+    "sauce-labs-bolt-t-shirt": "15.99",
+    "sauce-labs-fleece-jacket": "49.99",
+    "sauce-labs-onesie": "7.99",
+    "test.allthethings-t-shirt-red": "15.99",
+    "test-allthethings-t-shirt-red": "15.99",
+  };
+
+  return precios[key] || "";
+}
+
+function formatearImporte(valor) {
+  if (Array.isArray(valor)) return formatearImporte(valor[0]);
+
+  const texto = String(valor).trim();
+  const numero = Number(texto.replace(/[^0-9.,-]/g, "").replace(",", "."));
+  if (!Number.isFinite(numero)) return texto;
+
+  return numero.toFixed(2);
+}
+
+function construirCamposSeleccionados(acciones) {
+  const seleccionados = normalizarAcciones(acciones)
+    .filter((accion) => normalizarTipoAccion(accion.tipo) === "click")
+    .filter((accion) => accion.contexto || accion.detalle?.nombre || accion.detalle?.id || accion.detalle?.precio)
+    .filter((accion) => {
+      const texto = normalizarTextoComparacion([accion.texto, accion.nombreCampo].filter(Boolean).join(" "));
+      return texto.includes("add") ||
+        texto.includes("cart") ||
+        texto.includes("select") ||
+        texto.includes("seleccionar") ||
+        texto.includes("agregar") ||
+        texto.includes("comprar") ||
+        texto.includes("view") ||
+        texto.includes("product");
+    });
+
+  const campos = {};
+
+  seleccionados.forEach((accion, index) => {
+    const sufijo = seleccionados.length > 1 ? "_" + (index + 1) : "";
+    const detalle = accion.detalle || {};
+    const nombre = detalle.nombre || accion.contexto || accion.texto || "";
+    const id = detalle.id || extraerIdProductoTexto(accion.selector) || extraerIdProductoTexto(nombre);
+    const precio = detalle.precio || extraerPrecioTexto(accion.contexto || accion.texto || "");
+
+    if (nombre) campos["producto_seleccionado" + sufijo] = nombre;
+    if (id) campos["producto_id" + sufijo] = id;
+    if (precio) campos["producto_precio" + sufijo] = precio;
+  });
+
+  if (seleccionados.length > 1) {
+    const nombres = seleccionados
+      .map((accion) => accion.detalle?.nombre || accion.contexto || "")
+      .filter(Boolean);
+    const ids = seleccionados
+      .map((accion) => accion.detalle?.id || extraerIdProductoTexto(accion.selector) || extraerIdProductoTexto(accion.contexto))
+      .filter(Boolean);
+
+    if (nombres.length) campos.productos_seleccionados = nombres.join(", ");
+    if (ids.length) campos.productos_ids = ids.join(", ");
+  }
+
+  const precios = seleccionados
+    .map((accion) => accion.detalle?.precio || extraerPrecioTexto(accion.contexto || accion.texto || ""))
+    .filter(Boolean);
+  const total = sumarPrecios(precios);
+
+  if (precios.length) campos.productos_precios = precios.join(", ");
+  if (total) campos.importe_total = total;
+
+  return campos;
+}
+
+function sumarPrecios(precios) {
+  const numeros = precios
+    .map((precio) => Number(String(precio).replace(/[^0-9.,-]/g, "").replace(",", ".")))
+    .filter((n) => Number.isFinite(n));
+
+  if (!numeros.length) return "";
+
+  const total = numeros.reduce((acc, n) => acc + n, 0);
+  return total.toFixed(2);
+}
+
+function extraerPrecioTexto(texto) {
+  const match = String(texto || "").match(/(?:\$|USD|MXN|Rs\.?)\s*\d+(?:[.,]\d{1,2})?/i);
+  return match ? match[0].trim() : "";
+}
+
+function extraerIdProductoTexto(texto) {
+  const match = String(texto || "").match(/\b(?:SKU|ID|Item|Producto|Product|sauce-labs)[\s:#_-]*([A-Z0-9_-]{2,})\b/i);
+  return match ? match[1].trim() : "";
+}
+
+function selectorANombreCampo(selector) {
+  const limpio = String(selector || "")
+    .replace(/^#/, "")
+    .replace(/^\w+\[name=["']?([^"'\]]+)["']?\]$/, "$1")
+    .replace(/^\w+\[aria-label=["']?([^"'\]]+)["']?\]$/, "$1")
+    .replace(/^\[data-test=["']?([^"'\]]+)["']?\]$/, "$1");
+  return limpio;
+}
+
+function normalizarNombreCampoSheets(nombre) {
+  return String(nombre || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+}
+
+function siguienteNombreDisponible(nombreBase, objeto) {
+  if (!Object.prototype.hasOwnProperty.call(objeto, nombreBase)) return nombreBase;
+
+  let i = 2;
+  while (Object.prototype.hasOwnProperty.call(objeto, nombreBase + "_" + i)) i++;
+  return nombreBase + "_" + i;
 }
 
 // ─── DOM helpers ──────────────────────────────────────────────────────────────
@@ -799,6 +1303,7 @@ async function ejecutarAccionEnTab(tabId, accion) {
           etiqueta:    a.nombreCampo,
           texto:       a.texto,
           contexto:    a.contexto,
+          aliases:     a.aliases,
         });
       }
       // Minimal fallback if content script is not ready
@@ -866,6 +1371,11 @@ function normalizarAccion(a, tabId) {
     valor:       a?.valor || "",
     texto:       String(a?.texto || "").slice(0, 120),
     contexto:    String(a?.contexto || "").slice(0, 120), // nearby product name
+    detalle:      a?.detalle && typeof a.detalle === "object" ? {
+      id:     String(a.detalle.id || "").slice(0, 80),
+      nombre: String(a.detalle.nombre || "").slice(0, 120),
+      precio: String(a.detalle.precio || "").slice(0, 80),
+    } : {},
     tag:         a?.tag || "",
     nombreCampo: a?.nombreCampo || a?.campo || "",
     timestamp:   a?.timestamp || Date.now(),

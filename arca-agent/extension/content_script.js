@@ -95,15 +95,80 @@
 
   // Capture the product/item name near a button for context during replay
   function contextoPara(el) {
+    return detalleProductoPara(el).nombre || '';
+  }
+
+  function detalleProductoPara(el) {
     const card = el.closest(
       '[class*="item"], [class*="product"], [class*="card"], [class*="inventory"], ' +
       'li, article, tr, [class*="row"]'
     );
-    if (!card) return '';
-    const nameEl = card.querySelector(
-      '[class*="name"], [class*="title"], [class*="label"], h1, h2, h3, h4, strong, b'
+    if (!card) return {};
+
+    const nameEl = encontrarNombreProducto(card, el);
+    const priceEl = card.querySelector(
+      '.inventory_item_price, [data-test="inventory-item-price"], [data-testid="inventory-item-price"], ' +
+      '[class*="price"], [class*="cost"], [class*="amount"], [data-test*="price"], [data-testid*="price"]'
     );
-    return nameEl ? (nameEl.innerText || nameEl.textContent || '').trim().slice(0, 100) : '';
+    const id =
+      card.getAttribute('data-id') ||
+      card.getAttribute('data-sku') ||
+      card.getAttribute('data-item-id') ||
+      card.getAttribute('data-product-id') ||
+      el.getAttribute('data-test') ||
+      el.getAttribute('data-testid') ||
+      card.querySelector('[data-id], [data-sku], [data-item-id], [data-product-id]')?.getAttribute('data-id') ||
+      card.querySelector('[data-id], [data-sku], [data-item-id], [data-product-id]')?.getAttribute('data-sku') ||
+      extraerIdProducto(card.innerText || card.textContent || '');
+
+    return {
+      id: String(id || '').trim().slice(0, 80),
+      nombre: nameEl ? (nameEl.innerText || nameEl.textContent || '').trim().slice(0, 100) : '',
+      precio: priceEl ? (priceEl.innerText || priceEl.textContent || '').trim().slice(0, 80) : extraerPrecio(card.innerText || card.textContent || ''),
+    };
+  }
+
+  function encontrarNombreProducto(card, clickedEl) {
+    const selectores = [
+      '.inventory_item_name',
+      '[data-test="inventory-item-name"]',
+      '[data-testid="inventory-item-name"]',
+      '[class*="product-name"]',
+      '[class*="product_name"]',
+      '[class*="item-name"]',
+      '[class*="item_name"]',
+      '[class*="title"]',
+      'h1', 'h2', 'h3', 'h4', 'strong', 'b',
+    ];
+
+    for (const selector of selectores) {
+      const el = card.querySelector(selector);
+      if (esNombreProductoValido(el, clickedEl)) return el;
+    }
+
+    return Array.from(card.querySelectorAll('div, span, p'))
+      .find(el => esNombreProductoValido(el, clickedEl));
+  }
+
+  function esNombreProductoValido(el, clickedEl) {
+    if (!el || el === clickedEl) return false;
+    if (el.closest('button, a, [role="button"], input')) return false;
+    const texto = (el.innerText || el.textContent || '').trim();
+    if (!texto || texto.length > 120) return false;
+    const normalizado = texto.toLowerCase();
+    if (normalizado.includes('add to cart') || normalizado.includes('remove') || normalizado.includes('view product')) return false;
+    if (extraerPrecio(texto)) return false;
+    return true;
+  }
+
+  function extraerPrecio(texto) {
+    const match = String(texto || '').match(/(?:\$|USD|MXN|Rs\.?)\s*\d+(?:[.,]\d{1,2})?/i);
+    return match ? match[0].trim() : '';
+  }
+
+  function extraerIdProducto(texto) {
+    const match = String(texto || '').match(/\b(?:SKU|ID|Item|Producto|Product)[\s:#-]*([A-Z0-9_-]{2,})\b/i);
+    return match ? match[1].trim() : '';
   }
 
   function registrarAccion(tipo, el) {
@@ -124,6 +189,7 @@
       tag:         el.tagName?.toLowerCase() || '',
       nombreCampo: etiquetaPara(el),
       contexto:    (tipo === 'click' || tipo === 'change') ? contextoPara(el) : '',
+      detalle:      tipo === 'click' ? detalleProductoPara(el) : {},
       timestamp:   Date.now(),
       url:         location.href,
     };
@@ -240,6 +306,7 @@
     selectorAyuda = '',
     texto         = '',
     contexto      = '',
+    aliases       = [],
   } = {}) {
     const scores = new Map();
     const add = (el, pts) => {
@@ -247,26 +314,30 @@
       scores.set(el, (scores.get(el) || 0) + pts);
     };
 
+    const etiquetas = expandirAliasesCampo([etiqueta, placeholder, ariaLabel, texto, ...aliases]);
+
     if (selectorAyuda) { try { add(document.querySelector(selectorAyuda), 2); } catch {} }
 
-    if (placeholder) {
-      const pl = placeholder.toLowerCase();
+    for (const candidato of etiquetas) {
+      const pl = candidato.toLowerCase();
       document.querySelectorAll('input, textarea').forEach(el => {
         const ph = (el.placeholder || '').toLowerCase();
         if (ph === pl) add(el, 10); else if (ph.includes(pl) || pl.includes(ph)) add(el, 5);
       });
     }
 
-    if (ariaLabel) {
-      const al = ariaLabel.toLowerCase();
+    for (const candidato of etiquetas) {
+      const al = candidato.toLowerCase();
       document.querySelectorAll('[aria-label]').forEach(el => {
         const v = (el.getAttribute('aria-label') || '').toLowerCase();
         if (v === al) add(el, 10); else if (v.includes(al) || al.includes(v)) add(el, 5);
       });
     }
 
-    if (etiqueta) {
-      const eq = etiqueta.toLowerCase();
+    for (const candidato of etiquetas) {
+      const etiquetaActual = candidato;
+      if (!etiquetaActual) continue;
+      const eq = etiquetaActual.toLowerCase();
       document.querySelectorAll('label').forEach(lbl => {
         const clon = lbl.cloneNode(true);
         clon.querySelectorAll('input, select, textarea').forEach(i => i.remove());
@@ -319,6 +390,43 @@
     return [...scores.entries()].sort((a, b) => b[1] - a[1])[0][0];
   };
 
+  function expandirAliasesCampo(valores) {
+    const base = new Set();
+    valores
+      .flat()
+      .filter(Boolean)
+      .forEach(v => {
+        base.add(String(v).trim());
+        base.add(normalizarCampo(v));
+      });
+
+    const grupos = [
+      ['product name', 'product_name', 'product', 'producto', 'nombre producto', 'nombre del producto', 'nombre articulo', 'nombre del articulo', 'articulo', 'item name', 'item_name'],
+      ['price', 'unit price', 'unit_price', 'precio', 'precio unitario', 'precio_unitario', 'costo', 'costo unitario', 'costo_unitario'],
+      ['quantity', 'qty', 'cantidad', 'unidades'],
+      ['zip code', 'zip_code', 'zipcode', 'postal code', 'postal_code', 'codigo postal', 'codigo_postal', 'cp'],
+      ['customer', 'customer name', 'cliente', 'nombre cliente', 'nombre_cliente'],
+      ['sku', 'codigo sku', 'codigo_sku', 'codigo producto', 'codigo_producto', 'product code', 'product_code'],
+    ];
+
+    for (const grupo of grupos) {
+      if (grupo.some(alias => base.has(alias))) {
+        grupo.forEach(alias => base.add(alias));
+      }
+    }
+
+    return [...base].filter(Boolean);
+  }
+
+  function normalizarCampo(valor) {
+    return String(valor || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
   window.edyEjecutarAccion = async function ({
     tipo        = 'click',
     selector    = '',
@@ -327,10 +435,11 @@
     etiqueta    = '',
     texto       = '',
     contexto    = '',
+    aliases     = [],
   } = {}) {
     let el = selector ? document.querySelector(selector) : null;
     if (!el) {
-      el = window.edyEncontrarElemento({ etiqueta: etiqueta || nombreCampo, tipo, selectorAyuda: selector, texto, contexto });
+      el = window.edyEncontrarElemento({ etiqueta: etiqueta || nombreCampo, tipo, selectorAyuda: selector, texto, contexto, aliases });
     }
     if (!el) return false;
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -446,6 +555,10 @@
             detenerRecording();
           }
         }
+        break;
+
+      case 'orden_actual':
+        widget.setOrdenInfo?.('Orden #' + msg.orden);
         break;
 
       case 'campo_detectado':
