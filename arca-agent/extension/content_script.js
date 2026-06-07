@@ -317,14 +317,21 @@
   // ─────────────────────────────────────────────────────────────────────────────
 
   widget.onObservar(() => {
+    camposCapturados = 0;
     widget.resetObservando();
     widget.mostrarEstado('observando');
     sendMsg({ tipo: 'iniciar_grabacion' });
   });
 
   widget.onDetener(() => {
-    sendMsg({ tipo: 'detener_grabacion' });
-    widget.mostrarEstado('idle');
+    chrome.runtime.sendMessage({ tipo: "detener_grabacion" });
+    detenerGrabacion();
+    // Pasa al estado "aprendido": Edy ya sabe el proceso.
+    widget.setResumenAprendido(
+      camposCapturados + " campos · " + PASOS_EJECUCION.length + " pasos"
+    );
+    widget.mostrarEstado("aprendido");
+    widget.habilitarEjecutar(true);
   });
 
   widget.onEjecutar(async () => {
@@ -337,48 +344,28 @@
   });
 
   widget.onDashboard(() => {
-    sendMsg({ tipo: 'abrir_dashboard' });
+    if (DASHBOARD_URL) {
+      chrome.runtime.sendMessage({ tipo: "abrir_dashboard", url: DASHBOARD_URL });
+    }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // MESSAGES FROM BACKGROUND
-  // ─────────────────────────────────────────────────────────────────────────────
+  widget.onPausar(() => {
+    // Detener ejecución → vuelve al estado "aprendido" (Edy sigue sabiendo el proceso).
+    chrome.runtime.sendMessage({ tipo: "detener_ejecucion" });
+    widget.mostrarEstado("aprendido");
+  });
 
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (!msg?.tipo) return;
+  widget.onNuevo(() => {
+    // Nuevo proceso → reinicia todo desde cero.
+    chrome.runtime.sendMessage({ tipo: "nuevo_proceso" });
+  });
 
+  // ---------- Mensajes entrantes del background ----------
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (!msg || !msg.tipo) return;
     switch (msg.tipo) {
-      case 'iniciar_grabacion_tab':
-        iniciarRecording();
-        sendResponse({ ok: true });
-        break;
-
-      case 'detener_grabacion_tab': {
-        const acciones = detenerRecording();
-        sendResponse({ ok: true, acciones });
-        break;
-      }
-
-      case 'grabacion_iniciada':
-        iniciarRecording();          // start immediately on this page
-        widget.resetObservando();
-        widget.mostrarEstado('observando');
-        break;
-
-      case 'grabacion_detenida':
-        detenerRecording();
-        widget.mostrarEstado('idle');
-        if ((msg.totalAcciones || 0) > 0) widget.habilitarEjecutar(true);
-        break;
-
-      case 'estado_agente':
-        if      (msg.estado === 'observando') { widget.mostrarEstado('observando'); iniciarRecording(); }
-        else if (msg.estado === 'ejecutando') { widget.mostrarEstado('ejecutando'); }
-        else                                  { widget.mostrarEstado('idle'); detenerRecording(); }
-        if ((msg.totalAcciones || 0) > 0 && msg.estado === 'idle') widget.habilitarEjecutar(true);
-        break;
-
-      case 'campo_detectado':
+      case "campo_detectado":
+        camposCapturados++;
         widget.agregarCampoDetectado(msg.nombre, msg.time);
         break;
 
@@ -388,6 +375,9 @@
 
       case 'paso_completado':
         widget.marcarPasoCompletado(msg.paso);
+        break;
+      case "flujo_completado":
+        widget.mostrarEstado("completado");
         break;
     }
   });

@@ -3,294 +3,294 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Edy — Dashboard de Pedidos</title>
+  <title>ARCA·Agent · Dashboard</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg:        #0f0f1a;
-      --bg2:       #1a1a2e;
-      --bg3:       #16213e;
-      --accent:    #e63946;
-      --accent2:   #457b9d;
-      --green:     #2dc653;
-      --yellow:    #f4a261;
-      --text:      #e8e8f0;
-      --muted:     #888;
-      --border:    #2a2a42;
-      --radius:    10px;
+      --rojo: #CC0000;
+      --negro: #1A1A1A;
+      --gris-fondo: #F7F7F7;
+      --gris-texto: #888;
+      --blanco: #FFF;
+      --gris-borde: #E8E8E8;
     }
 
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--gris-fondo);
+      color: var(--negro);
       min-height: 100vh;
     }
 
-    /* ── Header ─────────────────────────────────────────────────────── */
-    header {
-      background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-      padding: 16px 32px;
+    /* ── Navbar ── */
+    nav {
+      background: var(--blanco);
+      border-bottom: 1px solid var(--gris-borde);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      height: 56px;
+      gap: 24px;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .nav-logo .logo-texto {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--rojo);
+      letter-spacing: -0.5px;
+    }
+    .nav-logo .logo-sub {
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: var(--gris-texto);
+      display: block;
+      margin-top: -2px;
+      text-transform: uppercase;
+    }
+    .nav-logo .edy-circle {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      border: 2.5px solid var(--rojo);
+      overflow: hidden;
+      display: flex; align-items: flex-start; justify-content: center;
+      background: var(--blanco);
+      flex-shrink: 0;
+    }
+    .nav-logo .edy-circle img { width: 160%; transform: translateY(-5%); }
+
+    .nav-tabs { display: flex; gap: 4px; margin-left: 16px; }
+    .nav-tab {
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--gris-texto);
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-family: inherit;
+    }
+    .nav-tab.activo {
+      background: #fff0f0;
+      color: var(--rojo);
+      font-weight: 700;
+    }
+
+    /* ── Contenido ── */
+    .contenido { padding: 32px; max-width: 1200px; margin: 0 auto; }
+
+    .page-title { font-size: 26px; font-weight: 800; margin-bottom: 4px; }
+    .page-sub { font-size: 13px; color: var(--gris-texto); margin-bottom: 28px; }
+
+    /* ── Tarjetas de stats ── */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+    .stat-card {
+      background: var(--blanco);
+      border-radius: 14px;
+      padding: 20px 22px;
+      border: 1px solid var(--gris-borde);
+    }
+    .stat-label { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--gris-texto); margin-bottom: 8px; }
+    .stat-valor { font-size: 32px; font-weight: 800; color: var(--negro); line-height: 1; }
+    .stat-delta { font-size: 12px; color: var(--rojo); margin-top: 6px; font-weight: 600; }
+    .stat-delta.estable { color: var(--gris-texto); font-weight: 400; }
+
+    /* ── Sección tabla ── */
+    .tabla-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      margin-bottom: 14px;
     }
-
-    .logo {
+    .tabla-titulo {
+      font-size: 15px;
+      font-weight: 700;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
     }
-
-    .logo-circle {
-      width: 38px; height: 38px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 900; font-size: 18px; color: #fff;
-    }
-
-    .logo-text { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
-    .logo-sub  { font-size: 12px; color: var(--muted); margin-top: 1px; }
-
-    #page-sub { font-size: 13px; color: var(--muted); }
-
-    /* ── Spinner ─────────────────────────────────────────────────────── */
-    #spinner {
-      position: fixed; inset: 0;
-      background: rgba(15,15,26,.85);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 9999;
-      flex-direction: column; gap: 12px;
-    }
-    #spinner.hidden { display: none; }
-
-    .spin-ring {
-      width: 44px; height: 44px;
-      border: 4px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Main layout ─────────────────────────────────────────────────── */
-    main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
-
-    /* ── Stats grid ──────────────────────────────────────────────────── */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-      margin-bottom: 32px;
-    }
-
-    .stat-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 24px;
-    }
-
-    .stat-label { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 8px; }
-    .stat-value { font-size: 32px; font-weight: 800; line-height: 1; }
-    .stat-delta { font-size: 12px; color: var(--green); margin-top: 6px; }
-
-    .stat-card.accent .stat-value { color: var(--accent); }
-    .stat-card.green  .stat-value { color: var(--green); }
-    .stat-card.blue   .stat-value { color: var(--accent2); }
-
-    /* ── Search bar ──────────────────────────────────────────────────── */
-    .toolbar {
-      display: flex;
+    .vivo {
+      display: inline-flex;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 16px;
+      gap: 5px;
+      background: #fff0f0;
+      color: var(--rojo);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 20px;
     }
-
-    .search-wrap {
-      position: relative;
-      flex: 1;
+    .vivo .dot-vivo {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--rojo);
+      animation: blink 1s steps(2,start) infinite;
     }
+    @keyframes blink { 50% { opacity: 0; } }
 
-    .search-icon {
-      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-      color: var(--muted); font-size: 16px; pointer-events: none;
-    }
-
-    #filtro-buscar {
-      width: 100%;
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 10px 12px 10px 36px;
-      color: var(--text);
-      font-size: 14px;
+    .buscar {
+      border: 1px solid var(--gris-borde);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-family: inherit;
+      color: var(--negro);
+      width: 240px;
       outline: none;
-      transition: border-color .2s;
     }
-    #filtro-buscar:focus { border-color: var(--accent2); }
+    .buscar:focus { border-color: var(--rojo); }
 
-    /* ── Table ───────────────────────────────────────────────────────── */
-    .table-wrap {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
+    /* ── Tabla ── */
+    .tabla-wrap {
+      background: var(--blanco);
+      border-radius: 14px;
+      border: 1px solid var(--gris-borde);
       overflow: hidden;
     }
-
-    #tabla.hidden { display: none; }
-
-    table { width: 100%; border-collapse: collapse; }
-
-    thead th {
-      background: var(--bg3);
-      padding: 12px 16px;
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead tr { background: var(--blanco); }
+    th {
       text-align: left;
-      font-size: 11px;
+      padding: 13px 20px;
+      font-size: 10px;
+      letter-spacing: 1px;
       text-transform: uppercase;
-      letter-spacing: .8px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-    }
-
-    tbody tr {
-      border-bottom: 1px solid var(--border);
-      transition: background .15s;
-    }
-    tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover { background: rgba(255,255,255,.03); }
-
-    tbody td {
-      padding: 14px 16px;
-      font-size: 14px;
-    }
-
-    /* ── Badges ──────────────────────────────────────────────────────── */
-    .badge {
-      display: inline-block;
-      padding: 3px 10px;
-      border-radius: 20px;
-      font-size: 11px;
+      color: var(--gris-texto);
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: .5px;
+      border-bottom: 1px solid var(--gris-borde);
     }
+    td { padding: 14px 20px; border-top: 1px solid var(--gris-borde); }
+    td:first-child { font-weight: 700; }
+    tr:hover td { background: #fafafa; }
 
-    .badge-completada { background: rgba(45,198,83,.15); color: var(--green); border: 1px solid rgba(45,198,83,.3); }
-    .badge-cola       { background: rgba(244,162,97,.15); color: var(--yellow); border: 1px solid rgba(244,162,97,.3); }
-    .badge-ejecutando { background: rgba(69,123,157,.2);  color: var(--accent2); border: 1px solid rgba(69,123,157,.4); }
-    .badge-error      { background: rgba(230,57,70,.15);  color: var(--accent);  border: 1px solid rgba(230,57,70,.3); }
+    /* Fila nueva con flash */
+    tr.nueva td { animation: flash 2s ease; }
+    @keyframes flash { 0% { background: #ffe5e5; } 100% { background: transparent; } }
 
-    /* ── Empty state ─────────────────────────────────────────────────── */
-    #vacio {
-      text-align: center;
-      padding: 64px 24px;
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
+    /* ── Badges de estado ── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
     }
-    #vacio.hidden { display: none; }
+    .badge-ejecutando { background: var(--negro); color: var(--blanco); }
+    .badge-ejecutando::before { content: "●"; font-size: 8px; }
+    .badge-completada { background: #ffe5e5; color: var(--rojo); }
+    .badge-completada::before { content: "✓"; }
+    .badge-cola { background: #f0f0f0; color: var(--gris-texto); }
+    .badge-error { background: #ffe5e5; color: var(--rojo); }
 
-    .vacio-icon { font-size: 48px; margin-bottom: 16px; opacity: .4; }
-    .vacio-titulo { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
-    .vacio-texto  { font-size: 14px; color: var(--muted); }
-
-    /* ── Live dot ────────────────────────────────────────────────────── */
-    .live-dot {
+    /* ── Vacío / spinner ── */
+    .vacio { text-align: center; padding: 60px; color: var(--gris-texto); font-size: 14px; }
+    .spinner-wrap { text-align: center; padding: 60px; color: var(--gris-texto); }
+    .spinner {
       display: inline-block;
-      width: 8px; height: 8px;
+      width: 22px; height: 22px;
+      border: 3px solid var(--gris-borde);
+      border-top-color: var(--rojo);
       border-radius: 50%;
-      background: var(--green);
-      animation: pulse 1.5s infinite;
-      margin-right: 6px;
+      animation: girar 0.7s linear infinite;
+      vertical-align: middle;
+      margin-left: 10px;
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50%       { opacity: .4; transform: scale(.8); }
+    @keyframes girar { to { transform: rotate(360deg); } }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 768px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .contenido { padding: 20px; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Spinner overlay -->
-  <div id="spinner">
-    <div class="spin-ring"></div>
-    <span style="font-size:13px;color:var(--muted)">Conectando con Edy…</span>
-  </div>
-
-  <!-- Header -->
-  <header>
-    <div class="logo">
-      <div class="logo-circle">E</div>
+  <!-- Navbar -->
+  <nav>
+    <a class="nav-logo" href="#">
+      <div class="edy-circle">
+        <img src="../extension/icons/EdyNeutro.png" alt="Edy">
+      </div>
       <div>
-        <div class="logo-text">Edy</div>
-        <div class="logo-sub">by Arca Continental</div>
+        <span class="logo-texto">ARCA·Agent</span>
+        <span class="logo-sub">Edy Dashboard</span>
       </div>
+    </a>
+    <div class="nav-tabs">
+      <button class="nav-tab activo">Órdenes</button>
+      <button class="nav-tab">Procesos</button>
     </div>
-    <span id="page-sub"><span class="live-dot"></span>En vivo</span>
-  </header>
+  </nav>
 
-  <main>
+  <!-- Contenido -->
+  <div class="contenido">
+
+    <div class="page-title">Órdenes procesadas hoy</div>
+    <div class="page-sub" id="page-sub">Cargando...</div>
+
     <!-- Stats -->
-    <div class="stats-grid">
-      <div class="stat-card accent">
-        <div class="stat-label">Pedidos Totales</div>
-        <div class="stat-value" id="stat-total">0</div>
-        <div class="stat-delta" id="stat-delta-total">cargando…</div>
-      </div>
-      <div class="stat-card green">
-        <div class="stat-label">Tiempo Ahorrado</div>
-        <div class="stat-value" id="stat-tiempo">0 min</div>
-        <div class="stat-delta">~3.5 min por pedido</div>
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-label">Órdenes automatizadas</div>
+        <div class="stat-valor" id="stat-total">—</div>
+        <div class="stat-delta" id="stat-delta-total"></div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Exactitud</div>
-        <div class="stat-value" id="stat-exactitud">—</div>
-        <div class="stat-delta">pedidos completados</div>
+        <div class="stat-label">Portales activos</div>
+        <div class="stat-valor" id="stat-portales">—</div>
+        <div class="stat-delta" id="stat-delta-portales"></div>
       </div>
-      <div class="stat-card blue">
-        <div class="stat-label">En Cola</div>
-        <div class="stat-value" id="stat-cola">0</div>
-        <div class="stat-delta" id="stat-delta-cola">pendientes</div>
+      <div class="stat-card">
+        <div class="stat-label">Campos capturados</div>
+        <div class="stat-valor" id="stat-campos">—</div>
+        <div class="stat-delta" id="stat-delta-campos"></div>
       </div>
-    </div>
-
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <div class="search-wrap">
-        <span class="search-icon">⌕</span>
-        <input id="filtro-buscar" type="text" placeholder="Buscar por orden, cliente, SKU, portal…" />
+      <div class="stat-card">
+        <div class="stat-label">Clics ahorrados</div>
+        <div class="stat-valor" id="stat-clics">—</div>
+        <div class="stat-delta estable" id="stat-delta-clics"></div>
       </div>
     </div>
 
-    <!-- Table -->
-    <div class="table-wrap">
-      <div id="tabla">
-        <table>
-          <thead>
-            <tr>
-              <th>Orden</th>
-              <th>Cliente</th>
-              <th>SKUs</th>
-              <th>Importe</th>
-              <th>Hora</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody id="tbody"></tbody>
-        </table>
+    <!-- Tabla -->
+    <div class="tabla-header">
+      <div class="tabla-titulo">
+        Tiempo real
+        <span class="vivo"><span class="dot-vivo"></span>EN VIVO</span>
       </div>
-
-      <div id="vacio">
-        <div class="vacio-icon">📦</div>
-        <div class="vacio-titulo">Sin pedidos aún</div>
-        <div class="vacio-texto">Usa la extensión Edy para observar y automatizar tu primer pedido.</div>
-      </div>
+      <input class="buscar" type="text" id="filtro-buscar"
+             placeholder="Buscar cliente, SKU, orden..." oninput="renderTabla()">
     </div>
-  </main>
+
+    <div class="tabla-wrap">
+      <div class="spinner-wrap" id="spinner">Cargando datos <span class="spinner"></span></div>
+      <table id="tabla" class="hidden">
+        <thead>
+          <tr>
+            <th>Orden</th>
+            <th>Cliente</th>
+            <th>SKUs</th>
+            <th>Importe</th>
+            <th>Hora</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="vacio hidden" id="vacio">Aún no hay órdenes registradas.</div>
+    </div>
+
+  </div>
 
   <script src="dashboard.js"></script>
 </body>

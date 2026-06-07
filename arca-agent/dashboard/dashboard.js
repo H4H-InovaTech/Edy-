@@ -4,151 +4,176 @@
 const WEB_APP_URL =
   "https://script.google.com/macros/s/AKfycbwZIds6wFjyqLf33nPOvS5SJ86YR0Z932lSS-iz80-ll8p3lgVydJQpjbamSfC1N1uM7w/exec";
 
-const REFRESH_MS = 3000;
+// ─────────────────────────────────────────────
+//  Estado global
+// ─────────────────────────────────────────────
+let todosLosRegistros = [];
+let cantidadAnterior = 0;
 
-// ─── DOM refs ────────────────────────────────────────────────────────────────
-
-const spinner      = document.getElementById("spinner");
-const pageSub      = document.getElementById("page-sub");
-const statTotal    = document.getElementById("stat-total");
-const statTiempo   = document.getElementById("stat-tiempo");
-const statExact    = document.getElementById("stat-exactitud");
-const statCola     = document.getElementById("stat-cola");
-const statDeltaTotal = document.getElementById("stat-delta-total");
-const statDeltaCola  = document.getElementById("stat-delta-cola");
-const filtroBuscar = document.getElementById("filtro-buscar");
-const tabla        = document.getElementById("tabla");
-const vacio        = document.getElementById("vacio");
-const tbody        = document.getElementById("tbody");
-
-// ─── State ───────────────────────────────────────────────────────────────────
-
-let todosPedidos = [];
-let prevTotal    = 0;
-let prevCola     = 0;
-
-// ─── Fetch & render ──────────────────────────────────────────────────────────
-
+// ─────────────────────────────────────────────
+//  Carga de datos desde Apps Script
+// ─────────────────────────────────────────────
 async function cargarDatos() {
   try {
-    const resp = await fetch(WEB_APP_URL + "?t=" + Date.now());
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const json = await resp.json();
-    if (!json.ok) throw new Error(json.error || "Error en Apps Script");
-    todosPedidos = json.data || [];
-  } catch (err) {
-    console.warn("[Edy dashboard]", err.message);
-    // Keep stale data if request fails — do not clear table
-  }
+    const res = await fetch(WEB_APP_URL);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error);
 
-  renderizar();
+    const hayNuevos = json.data.length > todosLosRegistros.length;
+    todosLosRegistros = json.data;
+
+    actualizarSubtitulo();
+    actualizarStats();
+    renderTabla(hayNuevos);
+  } catch (err) {
+    console.error("Edy dashboard:", err);
+  } finally {
+    document.getElementById("spinner").classList.add("hidden");
+  }
 }
 
-function renderizar() {
-  const filtro = (filtroBuscar?.value || "").trim().toLowerCase();
-  const visibles = filtro
-    ? todosPedidos.filter((r) =>
-        [r.orden, r.cliente, r.skus, r.portal, r.estado]
-          .some((v) => String(v || "").toLowerCase().includes(filtro))
-      )
-    : todosPedidos;
+// ─────────────────────────────────────────────
+//  Subtítulo dinámico con fecha y portal
+// ─────────────────────────────────────────────
+function actualizarSubtitulo() {
+  const fecha = new Date().toLocaleDateString("es-MX", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const portales = [
+    ...new Set(todosLosRegistros.map((r) => r.portal).filter(Boolean)),
+  ];
+  const portal = portales.length === 1 ? portales[0] : "Distribución Monterrey";
+  document.getElementById("page-sub").textContent =
+    fecha.charAt(0).toUpperCase() + fecha.slice(1) + " · " + portal;
+}
 
-  // Stats
-  const total      = todosPedidos.length;
-  const enCola     = todosPedidos.filter((r) => normalEstado(r.estado) === "cola").length;
-  const completadas = todosPedidos.filter((r) => normalEstado(r.estado) === "completada").length;
-  const exactitud  = total > 0 ? Math.round((completadas / total) * 100) : 100;
-  const tiempoTotal = (total * 3.5).toFixed(1);
+// ─────────────────────────────────────────────
+//  Tarjetas de estadísticas
+// ─────────────────────────────────────────────
+function actualizarStats() {
+  const total = todosLosRegistros.length;
 
-  if (statTotal)  statTotal.textContent  = total;
-  if (statTiempo) statTiempo.textContent = tiempoTotal + " min";
-  if (statExact)  statExact.textContent  = exactitud + "%";
-  if (statCola)   statCola.textContent   = enCola;
+  // Portales activos: valores únicos de la columna "portal"
+  const portales = new Set(
+    todosLosRegistros.map((r) => r.portal).filter(Boolean)
+  ).size;
 
-  if (statDeltaTotal) {
-    const delta = total - prevTotal;
-    statDeltaTotal.textContent = delta > 0 ? "+" + delta + " hoy" : "actualizado";
-  }
-  if (statDeltaCola) {
-    const delta = enCola - prevCola;
-    statDeltaCola.textContent = delta > 0 ? "+" + delta + " nuevas" : "al día";
-  }
+  // Campos capturados: cuenta todas las celdas que no sean "—" ni vacías,
+  // excluyendo timestamp, estado y portal (son de control, no datos del proceso)
+  const EXCLUIR = new Set(["timestamp", "estado", "portal"]);
+  const campos = todosLosRegistros.reduce((acc, r) => {
+    return acc + Object.entries(r).filter(
+      ([k, v]) => !EXCLUIR.has(k) && v && v !== "—"
+    ).length;
+  }, 0);
 
-  prevTotal = total;
-  prevCola  = enCola;
+  // Clics ahorrados: cada campo requiere ~3 interacciones (click + escribir + tab)
+  const clics = campos * 3;
 
-  // Table
-  if (!visibles.length) {
-    if (tabla)  tabla.classList.add("hidden");
-    if (vacio)  vacio.classList.remove("hidden");
+  // Deltas vs ciclo anterior
+  const diffTotal = total - cantidadAnterior;
+
+  document.getElementById("stat-total").textContent = total || "0";
+  document.getElementById("stat-portales").textContent = portales || "0";
+  document.getElementById("stat-campos").textContent = campos || "0";
+  document.getElementById("stat-clics").textContent = clics || "0";
+
+  document.getElementById("stat-delta-total").textContent =
+    cantidadAnterior > 0 && diffTotal > 0 ? "↑ " + diffTotal + " nueva" + (diffTotal > 1 ? "s" : "") : "";
+  document.getElementById("stat-delta-portales").textContent =
+    portales === 1 ? portales + " portal" : portales > 1 ? portales + " portales" : "";
+  document.getElementById("stat-delta-campos").textContent =
+    campos > 0 ? "~" + (campos / Math.max(total, 1)).toFixed(0) + " por orden" : "";
+  document.getElementById("stat-delta-clics").textContent =
+    clics > 0 ? "sin intervención humana" : "";
+
+  cantidadAnterior = total;
+}
+
+// ─────────────────────────────────────────────
+//  Render de la tabla
+// ─────────────────────────────────────────────
+function renderTabla(hayNuevos = false) {
+  const tabla = document.getElementById("tabla");
+  const vacio = document.getElementById("vacio");
+  const buscar = document.getElementById("filtro-buscar").value.toLowerCase();
+
+  let registros = todosLosRegistros.filter((r) => {
+    if (!buscar) return true;
+    return JSON.stringify(r).toLowerCase().includes(buscar);
+  });
+
+  if (registros.length === 0) {
+    tabla.classList.add("hidden");
+    vacio.classList.remove("hidden");
     return;
   }
 
-  if (tabla)  tabla.classList.remove("hidden");
-  if (vacio)  vacio.classList.add("hidden");
+  tabla.classList.remove("hidden");
+  vacio.classList.add("hidden");
 
-  if (!tbody) return;
-  tbody.innerHTML = visibles.map((r) => {
-    const estado  = normalEstado(r.estado);
-    const badgeClass = {
-      cola:       "badge badge-cola",
-      completada: "badge badge-completada",
-      ejecutando: "badge badge-ejecutando",
-      error:      "badge badge-error",
-    }[estado] || "badge";
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
 
-    const hora = formatearHora(r.hora || r.timestamp);
+  // Más recientes primero
+  [...registros].reverse().forEach((r, idx) => {
+    const tr = document.createElement("tr");
+    if (hayNuevos && idx === 0) tr.className = "nueva";
 
-    return `<tr>
-      <td>${escHtml(r.orden || "—")}</td>
-      <td>${escHtml(r.cliente || r.cliente_nombre || "—")}</td>
-      <td>${escHtml(r.skus || r.sku_producto || "—")}</td>
-      <td>${escHtml(String(r.importe || r.monto || "—"))}</td>
-      <td>${hora}</td>
-      <td><span class="${badgeClass}">${escHtml(r.estado || "—")}</span></td>
-    </tr>`;
-  }).join("");
-}
+    // Extraer hora del timestamp si existe (formato "DD/MM/YYYY, HH:MM:SS")
+    let hora = r.hora || "—";
+    if (!r.hora && r.timestamp) {
+      const match = r.timestamp.match(/(\d{1,2}:\d{2})/);
+      if (match) hora = match[1];
+    }
 
-// ─── Utils ───────────────────────────────────────────────────────────────────
+    // SKUs: mostrar "N SKUs" si es array/string con comas, o el valor directo
+    let skus = r.skus || r.sku_producto || "—";
+    if (Array.isArray(skus)) skus = skus.length + " SKUs";
+    else if (String(skus).includes(","))
+      skus = String(skus).split(",").length + " SKUs";
+    else if (skus !== "—") skus = skus + " SKUs";
 
-function normalEstado(e) {
-  return String(e || "").toLowerCase()
-    .replace("completada", "completada")
-    .replace("en cola", "cola")
-    .replace("cola",    "cola")
-    .replace("ejecutando", "ejecutando")
-    .replace("error",   "error");
-}
+    // Importe: formatear si es número
+    let importe = r.importe || r.monto || "—";
+    if (importe !== "—" && !isNaN(importe)) {
+      importe =
+        "$ " +
+        Number(importe).toLocaleString("es-MX", { minimumFractionDigits: 2 });
+    }
 
-function formatearHora(ts) {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return String(ts).slice(0, 19);
-  return d.toLocaleString("es-MX", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
+    tr.innerHTML =
+      `<td>${r.orden || r.cliente_id || "—"}</td>` +
+      `<td>${r.cliente || r.cliente_nombre || "—"}</td>` +
+      `<td>${skus}</td>` +
+      `<td>${importe}</td>` +
+      `<td>${hora}</td>` +
+      `<td>${badgeEstado(r.estado)}</td>`;
+
+    tbody.appendChild(tr);
   });
 }
 
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+// ─────────────────────────────────────────────
+//  Badge de estado
+// ─────────────────────────────────────────────
+function badgeEstado(val) {
+  if (!val || val === "—") return '<span class="badge badge-cola">—</span>';
+  const v = String(val).toLowerCase();
+  if (v.includes("ejecut"))
+    return `<span class="badge badge-ejecutando">${val}</span>`;
+  if (v.includes("complet"))
+    return `<span class="badge badge-completada">${val}</span>`;
+  if (v.includes("cola")) return `<span class="badge badge-cola">${val}</span>`;
+  if (v.includes("error") || v.includes("fall"))
+    return `<span class="badge badge-error">${val}</span>`;
+  return `<span class="badge badge-cola">${val}</span>`;
 }
 
-// ─── Boot ────────────────────────────────────────────────────────────────────
-
-if (spinner) spinner.classList.remove("hidden");
-if (pageSub) pageSub.textContent = "Cargando pedidos…";
-
-cargarDatos().then(() => {
-  if (spinner) spinner.classList.add("hidden");
-  if (pageSub) pageSub.textContent = "Pedidos automatizados por Edy";
-});
-
-if (filtroBuscar) filtroBuscar.addEventListener("input", renderizar);
-
-setInterval(cargarDatos, REFRESH_MS);
+// ─────────────────────────────────────────────
+//  Arranque y auto-refresh cada 3 segundos
+// ─────────────────────────────────────────────
+cargarDatos();
+setInterval(cargarDatos, 3000);
