@@ -28,6 +28,9 @@
     "Confirmar pedido",
   ];
 
+  // Cuántos campos se han capturado en la grabación actual (para el resumen).
+  let camposCapturados = 0;
+
   // ---------- Grabación ----------
   function iniciarGrabacion() {
     // TODO: poner listeners globales en la página (click, input/change, submit).
@@ -51,6 +54,7 @@
 
   // ---------- Conectar la UI con la lógica ----------
   widget.onObservar(() => {
+    camposCapturados = 0;
     widget.resetObservando();
     widget.mostrarEstado("observando");
     chrome.runtime.sendMessage({ tipo: "iniciar_grabacion" });
@@ -60,7 +64,11 @@
   widget.onDetener(() => {
     chrome.runtime.sendMessage({ tipo: "detener_grabacion" });
     detenerGrabacion();
-    widget.mostrarEstado("idle");
+    // Pasa al estado "aprendido": Edy ya sabe el proceso.
+    widget.setResumenAprendido(
+      camposCapturados + " campos · " + PASOS_EJECUCION.length + " pasos"
+    );
+    widget.mostrarEstado("aprendido");
     widget.habilitarEjecutar(true);
   });
 
@@ -71,10 +79,21 @@
     iniciarEjecucion();
   });
 
+  widget.onDashboard(() => {
+    if (DASHBOARD_URL) {
+      chrome.runtime.sendMessage({ tipo: "abrir_dashboard", url: DASHBOARD_URL });
+    }
+  });
+
   widget.onPausar(() => {
-    // TEMPORAL: muestra la pantalla de confeti para previsualizarla.
-    // TODO: restaurar el flujo real (detener_ejecucion → idle).
-    widget.mostrarEstado("completado");
+    // Detener ejecución → vuelve al estado "aprendido" (Edy sigue sabiendo el proceso).
+    chrome.runtime.sendMessage({ tipo: "detener_ejecucion" });
+    widget.mostrarEstado("aprendido");
+  });
+
+  widget.onNuevo(() => {
+    // Nuevo proceso → reinicia todo desde cero.
+    chrome.runtime.sendMessage({ tipo: "nuevo_proceso" });
   });
 
   // ---------- Mensajes entrantes del background ----------
@@ -82,6 +101,7 @@
     if (!msg || !msg.tipo) return;
     switch (msg.tipo) {
       case "campo_detectado":
+        camposCapturados++;
         widget.agregarCampoDetectado(msg.nombre, msg.time);
         break;
       case "paso_actual":

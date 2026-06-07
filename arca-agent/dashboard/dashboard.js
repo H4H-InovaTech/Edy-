@@ -55,44 +55,40 @@ function actualizarSubtitulo() {
 // ─────────────────────────────────────────────
 function actualizarStats() {
   const total = todosLosRegistros.length;
-  const enCola = todosLosRegistros.filter((r) =>
-    String(r.estado || "")
-      .toLowerCase()
-      .includes("cola"),
-  ).length;
-  const completadas = todosLosRegistros.filter((r) =>
-    String(r.estado || "")
-      .toLowerCase()
-      .includes("complet"),
-  ).length;
 
-  // Exactitud: % de completadas vs total (excluye "en cola")
-  const procesadas = todosLosRegistros.filter(
-    (r) =>
-      !String(r.estado || "")
-        .toLowerCase()
-        .includes("cola"),
-  ).length;
-  const exactitud =
-    procesadas > 0 ? ((completadas / procesadas) * 100).toFixed(1) + "%" : "—";
+  // Portales activos: valores únicos de la columna "portal"
+  const portales = new Set(
+    todosLosRegistros.map((r) => r.portal).filter(Boolean)
+  ).size;
 
-  // Tiempo ahorrado: si el campo viene en los datos, lo suma; si no, estima ~3.5 min/orden
-  const tiempoMin = todosLosRegistros.reduce((acc, r) => {
-    return acc + (parseFloat(r.tiempo_ahorrado) || 3.5);
+  // Campos capturados: cuenta todas las celdas que no sean "—" ni vacías,
+  // excluyendo timestamp, estado y portal (son de control, no datos del proceso)
+  const EXCLUIR = new Set(["timestamp", "estado", "portal"]);
+  const campos = todosLosRegistros.reduce((acc, r) => {
+    return acc + Object.entries(r).filter(
+      ([k, v]) => !EXCLUIR.has(k) && v && v !== "—"
+    ).length;
   }, 0);
-  const tiempoH = tiempoMin > 0 ? (tiempoMin / 60).toFixed(1) + "h" : "—";
+
+  // Clics ahorrados: cada campo requiere ~3 interacciones (click + escribir + tab)
+  const clics = campos * 3;
+
+  // Deltas vs ciclo anterior
+  const diffTotal = total - cantidadAnterior;
 
   document.getElementById("stat-total").textContent = total || "0";
-  document.getElementById("stat-tiempo").textContent = tiempoH;
-  document.getElementById("stat-exactitud").textContent = exactitud;
-  document.getElementById("stat-cola").textContent = enCola;
+  document.getElementById("stat-portales").textContent = portales || "0";
+  document.getElementById("stat-campos").textContent = campos || "0";
+  document.getElementById("stat-clics").textContent = clics || "0";
 
-  // Deltas (solo si hay datos anteriores)
-  const diff = total - cantidadAnterior;
   document.getElementById("stat-delta-total").textContent =
-    cantidadAnterior > 0 && diff > 0 ? "↑ " + diff + " vs antes" : "";
-  document.getElementById("stat-delta-cola").textContent =
-    enCola === 0 ? "estable" : enCola + " pendientes";
+    cantidadAnterior > 0 && diffTotal > 0 ? "↑ " + diffTotal + " nueva" + (diffTotal > 1 ? "s" : "") : "";
+  document.getElementById("stat-delta-portales").textContent =
+    portales === 1 ? portales + " portal" : portales > 1 ? portales + " portales" : "";
+  document.getElementById("stat-delta-campos").textContent =
+    campos > 0 ? "~" + (campos / Math.max(total, 1)).toFixed(0) + " por orden" : "";
+  document.getElementById("stat-delta-clics").textContent =
+    clics > 0 ? "sin intervención humana" : "";
 
   cantidadAnterior = total;
 }
